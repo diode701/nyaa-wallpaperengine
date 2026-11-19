@@ -52,7 +52,8 @@ public:
      *
      * @return
      */
-    void dequeuePacket ();
+    /** takes one queued packet into m_decodePacket; false if none is queued (never waits) */
+    bool dequeuePacket ();
 
     /**
      * @return The audio context in use for this audio stream

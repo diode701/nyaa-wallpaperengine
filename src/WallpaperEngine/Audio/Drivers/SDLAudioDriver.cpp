@@ -42,15 +42,18 @@ void audio_callback (void* userdata, uint8_t* streamData, int length) {
 		// get more data to fill the buffer
 		int audio_size = buffer->stream->decodeFrame (buffer->audio_buf, sizeof (buffer->audio_buf));
 
-		if (audio_size < 0) {
-		    // fallback for errors, silence
-		    buffer->audio_buf_size = 1024;
-		    memset (buffer->audio_buf, 0, buffer->audio_buf_size);
-		} else {
-		    buffer->audio_buf_size = audio_size;
+		buffer->audio_buf_index = 0;
+
+		if (audio_size <= 0) {
+		    // nothing decoded yet (or a broken frame): leave the rest of this
+		    // slice silent and wake the reader, instead of spinning here or
+		    // replaying a fixed block (which was heard as beeps)
+		    buffer->audio_buf_size = 0;
+		    SDL_CondSignal (buffer->stream->getWaitCondition ());
+		    break;
 		}
 
-		buffer->audio_buf_index = 0;
+		buffer->audio_buf_size = audio_size;
 	    }
 
 	    int len1 = buffer->audio_buf_size - buffer->audio_buf_index;

@@ -372,39 +372,38 @@ bool AudioStream::doQueue (AVPacket* pkt) {
     return true;
 }
 
-void AudioStream::dequeuePacket () {
+bool AudioStream::dequeuePacket () {
+    // never blocks: it runs on the audio device's real-time callback, and
+    // waiting here starves the device (crackles, repeated short buffers)
     MyAVPacketList entry {};
+    bool got = false;
 
     SDL_LockMutex (this->m_queue->mutex);
 
-    while (this->m_audioContext.getApplicationContext ().state.general.keepRunning) {
 #if FF_API_FIFO_OLD_API
-	int ret = -1;
+    int ret = -1;
 
-	if (av_fifo_size (this->m_queue->packetList) >= static_cast<int> (sizeof (entry))) {
-	    ret = av_fifo_generic_read (this->m_queue->packetList, &entry, sizeof (entry), nullptr);
-	}
+    if (av_fifo_size (this->m_queue->packetList) >= static_cast<int> (sizeof (entry))) {
+	ret = av_fifo_generic_read (this->m_queue->packetList, &entry, sizeof (entry), nullptr);
+    }
 #else
-	const int ret = av_fifo_read (this->m_queue->packetList, &entry, 1);
+    const int ret = av_fifo_read (this->m_queue->packetList, &entry, 1);
 #endif
 
-	// enough data available, read it
-	if (ret >= 0) {
-	    this->m_queue->nb_packets--;
-	    this->m_queue->size -= entry.packet->size + sizeof (entry);
-	    this->m_queue->duration -= entry.packet->duration;
+    if (ret >= 0) {
+	this->m_queue->nb_packets--;
+	this->m_queue->size -= entry.packet->size + sizeof (entry);
+	this->m_queue->duration -= entry.packet->duration;
 
-	    // move the reference and free the old one
-	    av_packet_move_ref (this->m_decodePacket, entry.packet);
-	    av_packet_free (&entry.packet);
-	    break;
-	}
-
-	// make the thread wait if nothing was available
-	SDL_CondWait (this->m_queue->cond, this->m_queue->mutex);
+	// move the reference and free the old one
+	av_packet_move_ref (this->m_decodePacket, entry.packet);
+	av_packet_free (&entry.packet);
+	got = true;
     }
 
     SDL_UnlockMutex (this->m_queue->mutex);
+
+    return got;
 }
 
 AVCodecContext* AudioStream::getContext () const { return this->m_context; }
@@ -583,58 +582,45 @@ int AudioStream::resampleAudio (uint8_t* out_buf, const int out_size) {
 }
 
 int AudioStream::decodeFrame (uint8_t* audioBuffer, const int bufferSize) {
-    // this used to be a function-local static shared by every stream in the
-    // scene; with ~20 sounds loaded the accounting of one file bled into the
-    // next
-    int& audio_pkt_size = this->m_audioPacketSize;
-
-    // block until there's any data in the buffers
+    // The usual FFmpeg decode loop: drain every frame the decoder holds, and
+    // feed it one packet only when it asks for input. The old loop sent the
+    // same packet whatever the decoder said (packets were dropped on EAGAIN),
+    // took one frame per packet and blocked on an empty queue inside the
+    // audio callback: gaps and stalls, heard as crackles and beeps.
+    // Returns the bytes written, 0 when no data is ready yet (the caller plays
+    // silence) and -1 on a decoding error.
     while (this->m_audioContext.getApplicationContext ().state.general.keepRunning) {
-	while (audio_pkt_size > 0 && this->m_audioContext.getApplicationContext ().state.general.keepRunning) {
-	    int got_frame = 0;
-	    int ret = avcodec_receive_frame (this->getContext (), this->m_decodeFrame);
+	const int ret = avcodec_receive_frame (this->getContext (), this->m_decodeFrame);
 
-	    if (ret == 0) {
-		got_frame = 1;
-	    }
-	    if (ret == AVERROR (EAGAIN)) {
-		ret = 0;
-	    }
-	    if (ret == 0) {
-		ret = avcodec_send_packet (this->getContext (), this->m_decodePacket);
-	    }
-	    if (ret < 0 && ret != AVERROR (EAGAIN)) {
-		return -1;
+	if (ret == 0) {
+	    const int dataSize = this->resampleAudio (audioBuffer, bufferSize);
+	    av_frame_unref (this->m_decodeFrame);
+
+	    if (dataSize > 0) {
+		return dataSize;
 	    }
 
-	    if (this->m_decodePacket->size < 0) {
-		// if error, skip frame
-		audio_pkt_size = 0;
-		break;
-	    }
-
-	    audio_pkt_size -= this->m_decodePacket->size;
-	    int data_size = 0;
-
-	    if (got_frame) {
-		// audio resampling
-		data_size = this->resampleAudio (audioBuffer, bufferSize);
-	    }
-	    if (data_size <= 0) {
-		// no data found, keep waiting
-		continue;
-	    }
-	    // some data was found
-	    return data_size;
+	    continue;
 	}
 
-	if (this->m_decodePacket->data) {
-	    av_packet_unref (this->m_decodePacket);
+	if (ret != AVERROR (EAGAIN)) {
+	    // AVERROR_EOF never happens (no flush packet is sent); anything else
+	    // is a broken stream: restart the decoder rather than spin
+	    avcodec_flush_buffers (this->getContext ());
+	    return -1;
 	}
 
-	this->dequeuePacket ();
+	// the decoder wants input
+	if (!this->dequeuePacket ()) {
+	    return 0;
+	}
 
-	audio_pkt_size = this->m_decodePacket->size;
+	const int sent = avcodec_send_packet (this->getContext (), this->m_decodePacket);
+	av_packet_unref (this->m_decodePacket);
+
+	if (sent < 0 && sent != AVERROR (EAGAIN) && sent != AVERROR_INVALIDDATA) {
+	    return -1;
+	}
     }
 
     return 0;
