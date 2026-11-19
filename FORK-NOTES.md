@@ -28,13 +28,10 @@ State on 2026-11-19, branch `nyaa-fixes`. Long-form evidence:
    appears only after a click reaches the page. On a real desktop the clicks go
    to plasmashell, not the wallpaper surface, so interactive web wallpapers stay
    silent until desktop clicks are forwarded (a KDE-side feature, out of scope).
-2. *Flatpak-compatible engine*: rpath `$ORIGIN` (no `LD_LIBRARY_PATH` wrapper;
-   the host's stock wrapper only finds `libcef.so` through an accidental empty
-   path entry), asset lookup = `--assets-dir`, then native Steam
-   `~/.local/share/Steam/steamapps/common/wallpaper_engine/assets`, then
-   `../share/linux-wallpaperengine/assets`; CEF without its own sandbox when
-   `/.flatpak-info` exists; caches/logs under XDG dirs; strip `libcef.so`
-   (1.4 GB is unstripped).
+2. ~~*Flatpak-compatible engine*~~ **done** (fix 10 below). Left for the
+   packaging step: strip `libcef.so` (1.4 GB unstripped), install only the
+   runtime files (not the test binaries / `chrome-sandbox` that land in
+   `build/output`).
 3. Flatpak module (sources pinned: glew, freeglut, mpv, CEF archive, this tree
    with submodules), wired into nyaa-paper's manifest, which already grants
    read-only access to the Steam assets folder.
@@ -77,6 +74,14 @@ State on 2026-11-19, branch `nyaa-fixes`. Long-form evidence:
 9. **Assets** are also looked up next to the binary and in
    `../share/linux-wallpaperengine/assets`, so packaged builds work without
    `--assets-dir`.
+10. **Runs from any install location, inside a Flatpak.** RUNPATH is `$ORIGIN`
+    (it used to be the absolute build-tree paths, so installed copies needed an
+    `LD_LIBRARY_PATH` wrapper); kissfft is linked statically. Chromium's own
+    sandbox is turned off when `/.flatpak-info` exists (or `LWE_NO_CEF_SANDBOX`
+    is set): it needs a setuid helper or nested user namespaces, which a Flatpak
+    forbids. The CEF profile moved from a never-deleted `/tmp/<uuid>` to
+    `$XDG_CACHE_HOME/linux-wallpaperengine/cef-<uuid>`, removed on shutdown
+    (one per instance, since CEF locks it and nyaa-paper runs one per monitor).
 
 ## Building
 
@@ -115,6 +120,7 @@ Debug switches (environment, no effect on normal runs):
 | `LWE_SHADER_DUMP=<dir>` | dump every compiled vertex/fragment pair |
 | `LWE_FAKE_CURSOR=x,y` / `LWE_FAKE_CURSOR_ANIMATE` / `LWE_FAKE_CLICK` | drive the pointer without a display |
 | `LWE_AUDIO_DEBUG` | sum of the 16-band spectrum the scripts see |
+| `LWE_NO_CEF_SANDBOX` | disable Chromium's sandbox outside a Flatpak too |
 | `LWE_NO_AUDIO_DEVICE` | keep the audio driver without opening a device (sanitizer runs) |
 
 ## Known gaps

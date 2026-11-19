@@ -4,6 +4,7 @@
 #include "WallpaperEngine/WebBrowser/CEF/SubprocessApp.h"
 #include "include/cef_app.h"
 #include "include/cef_render_handler.h"
+#include <cstdlib>
 #include <filesystem>
 #include <random>
 
@@ -75,12 +76,21 @@ WebBrowserContext::WebBrowserContext (WallpaperEngine::Application::WallpaperApp
 
     // Configurate Chromium
     CefSettings settings;
-    std::string cache_path = (std::filesystem::temp_directory_path () / uuid::generate_uuid_v4 ()).string ();
-    // CefString(&settings.locales_dir_path) = "OffScreenCEF/godot/locales";
-    // CefString(&settings.resources_dir_path) = "OffScreenCEF/godot/";
-    // CefString(&settings.framework_dir_path) = "OffScreenCEF/godot/";
-    // CefString(&settings.cache_path) = "OffScreenCEF/godot/";
-    //  CefString(&settings.browser_subprocess_path) = "path/to/client"
+    // one profile per engine instance (CEF locks its root cache, and nyaa-paper
+    // runs one engine per monitor); kept under the user's cache dir instead of
+    // /tmp and removed again in the destructor
+    std::filesystem::path cacheBase;
+    if (const char* xdg = std::getenv ("XDG_CACHE_HOME"); xdg != nullptr && *xdg == '/') {
+	cacheBase = xdg;
+    } else if (const char* home = std::getenv ("HOME"); home != nullptr && *home == '/') {
+	cacheBase = std::filesystem::path (home) / ".cache";
+    } else {
+	cacheBase = std::filesystem::temp_directory_path ();
+    }
+    this->m_cachePath = cacheBase / "linux-wallpaperengine" / ("cef-" + uuid::generate_uuid_v4 ());
+    std::error_code mkdirError;
+    std::filesystem::create_directories (this->m_cachePath, mkdirError);
+    const std::string cache_path = this->m_cachePath.string ();
     cef_string_utf8_to_utf16 (cache_path.c_str (), cache_path.length (), &settings.root_cache_path);
     settings.windowless_rendering_enabled = true;
     // CWeb drives the browser with CefDoMessageLoopWork(); without this flag
@@ -89,6 +99,13 @@ WebBrowserContext::WebBrowserContext (WallpaperEngine::Application::WallpaperApp
     settings.external_message_pump = true;
 #if defined(CEF_NO_SANDBOX)
     settings.no_sandbox = true;
+#else
+    // Chromium's sandbox needs a setuid helper or nested user namespaces; a
+    // Flatpak allows neither (the Flatpak itself is the sandbox)
+    if (std::filesystem::exists ("/.flatpak-info") || std::getenv ("LWE_NO_CEF_SANDBOX") != nullptr) {
+	sLog.out ("Running inside a sandbox, disabling Chromium's own sandbox");
+	settings.no_sandbox = true;
+    }
 #endif
 
     // spawns two new processess
@@ -107,4 +124,9 @@ WebBrowserContext::~WebBrowserContext () {
     }
 
     CefShutdown ();
+
+    if (!this->m_cachePath.empty ()) {
+	std::error_code error;
+	std::filesystem::remove_all (this->m_cachePath, error);
+    }
 }

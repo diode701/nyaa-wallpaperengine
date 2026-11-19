@@ -42,6 +42,8 @@ set(SPIRV_CROSS_FORCE_PIC ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(KISSFFT_TEST OFF)
 set(KISSFFT_TOOLS OFF)
+# link kissfft into the engine library so the install needs no extra .so
+set(KISSFFT_STATIC ON CACHE BOOL "" FORCE)
 
 # Download CEF of specified version for current platform
 # Specify the CEF distribution version.
@@ -623,6 +625,14 @@ add_executable(linux-wallpaperengine
     src/main.cpp)
 
 target_link_libraries (linux-wallpaperengine PUBLIC linux-wallpaperengine-lib)
+
+# everything the engine loads (libcef.so, the engine library) sits next to the
+# binary: look there, not in the build tree, so an installed copy (Flatpak,
+# /opt, a tarball) runs without an LD_LIBRARY_PATH wrapper
+set_target_properties(linux-wallpaperengine linux-wallpaperengine-lib PROPERTIES
+    BUILD_RPATH "\$ORIGIN"
+    INSTALL_RPATH "\$ORIGIN"
+    BUILD_WITH_INSTALL_RPATH ON)
 
 # set some install parameters if not in debug mode
 install(DIRECTORY ${TARGET_OUTPUT_DIRECTORY}/ DESTINATION .)
