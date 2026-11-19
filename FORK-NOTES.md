@@ -22,13 +22,12 @@ State on 2026-11-19, branch `nyaa-fixes`. Long-form evidence:
 - Make the engine itself Flatpak-friendly instead of relying on wrapper scripts.
 
 **Next, in order**
-1. *Web audio is intermittent* (`901759762`, a page playing its own MP3s via
-   `<audio>`). Observed: one run had a `Chromium` sink-input (playing, unmuted),
-   the next had none 9 s in. Autoplay is already allowed
-   (`--autoplay-policy=no-user-gesture-required`), no audio handler or mute in
-   the CEF code. To check: when the page calls `.play()` (load, timer, click?),
-   and whether CEF's AudioService utility process starts/crashes (log shows
-   zygote / NetworkService crash lines, possibly from the test's kill).
+1. ~~*Web audio is intermittent* (`901759762`)~~ **not an engine bug.** The page
+   never plays on load: `Scripts/script.js` calls `.play()` only from click
+   handlers (`#PlayBGMButton`, `.Option.Line`, `#PlayRandomLineButton`). Sound
+   appears only after a click reaches the page. On a real desktop the clicks go
+   to plasmashell, not the wallpaper surface, so interactive web wallpapers stay
+   silent until desktop clicks are forwarded (a KDE-side feature, out of scope).
 2. *Flatpak-compatible engine*: rpath `$ORIGIN` (no `LD_LIBRARY_PATH` wrapper;
    the host's stock wrapper only finds `libcef.so` through an accidental empty
    path entry), asset lookup = `--assets-dir`, then native Steam
