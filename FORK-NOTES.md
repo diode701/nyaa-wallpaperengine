@@ -133,6 +133,20 @@ Debug switches (environment, no effect on normal runs):
 
 ## Known gaps
 
+- **Intermittent audio crackle/beeps** (e.g. `1823900922` Nissan GT-R, scene
+  with ambient audio): some runs clean, some crackle; seen on the host build
+  too, so not packaging. Suspects: auto-mute flapping (the PulseAudio playing
+  detector may count our own/Chromium's stream as "other audio" and toggle
+  mute rapidly; the user recalls "don't auto-mute" fixing it), or underruns in
+  the SDL stream path. Next: run with `LWE_AUDIO_DEBUG`, log mute toggles in
+  `PulseAudioPlayingDetector`, compare on a second machine.
+- **Presets** (`project.json` with only `dependency` + `preset`, no `type`):
+  "Project type missing". Resolve in nyaa-paper (pass the dependency and the
+  preset values), see its START-HERE 4c.
+- `3413921910` (Meteors at Dawn) renders black.
+- Interactive web wallpapers get no clicks on the real desktop (Plasma takes
+  them), so pages that start audio on click stay silent.
+
 - screenshots of **web** and **video** wallpapers come out black even though they
   render on screen (affects only *screenshot on apply* / pywal theming in nyaa-paper; its grid thumbnails come from each wallpaper's preview file);
 - `Light` objects are still unsupported;
