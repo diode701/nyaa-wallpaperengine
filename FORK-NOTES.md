@@ -147,9 +147,13 @@ Debug switches (environment, no effect on normal runs):
 - **Presets** (`project.json` with only `dependency` + `preset`, no `type`):
   "Project type missing". Resolve in nyaa-paper (pass the dependency and the
   preset values), see its START-HERE 4c.
-- `3413921910` (Meteors at Dawn) renders black.
-- Interactive web wallpapers get no clicks on the real desktop (Plasma takes
-  them), so pages that start audio on click stay silent.
+- `3413921910` (Meteors at Dawn, 4K scene) is **blank in the Flatpak only**;
+  it works on the host build (a black host *screenshot* misled the first
+  diagnosis). Logs barely differ; lead: the Flatpak builds GLEW 2.2.0
+  (host: 2.3.1) and `glewInit` reports "Unknown error" there instead of the
+  expected `GLEW_ERROR_NO_GLX_DISPLAY`; try glew 2.3.1 in the manifest.
+- Interactive web wallpapers: clicks DO reach the page on the desktop
+  (user-verified). Web audio: retest with the auto-mute + decoder fixes.
 
 - screenshots of **web** and **video** wallpapers come out black even though they
   render on screen (affects only *screenshot on apply* / pywal theming in nyaa-paper; its grid thumbnails come from each wallpaper's preview file);
