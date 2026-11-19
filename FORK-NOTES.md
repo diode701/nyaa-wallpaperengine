@@ -10,6 +10,38 @@ below.
 Everything in here was verified by running wallpapers, not by reading the code;
 the measurement notes live in `~/lwe-audit/REPORT.md` on the development machine.
 
+## Start here (next session)
+
+State on 2026-11-19, branch `nyaa-fixes`. Long-form evidence:
+`~/lwe-audit/REPORT.md` (canonical) on the development machine.
+
+**Rules**
+- Wallpaper Engine's `assets/` are paid Steam content: the engine reads them
+  from the host at runtime; **never copy, bundle or commit them** (that includes
+  shader dumps made with `LWE_SHADER_DUMP`).
+- Make the engine itself Flatpak-friendly instead of relying on wrapper scripts.
+
+**Next, in order**
+1. *Web audio is intermittent* (`901759762`, a page playing its own MP3s via
+   `<audio>`). Observed: one run had a `Chromium` sink-input (playing, unmuted),
+   the next had none 9 s in. Autoplay is already allowed
+   (`--autoplay-policy=no-user-gesture-required`), no audio handler or mute in
+   the CEF code. To check: when the page calls `.play()` (load, timer, click?),
+   and whether CEF's AudioService utility process starts/crashes (log shows
+   zygote / NetworkService crash lines, possibly from the test's kill).
+2. *Flatpak-compatible engine*: rpath `$ORIGIN` (no `LD_LIBRARY_PATH` wrapper;
+   the host's stock wrapper only finds `libcef.so` through an accidental empty
+   path entry), asset lookup = `--assets-dir`, then native Steam
+   `~/.local/share/Steam/steamapps/common/wallpaper_engine/assets`, then
+   `../share/linux-wallpaperengine/assets`; CEF without its own sandbox when
+   `/.flatpak-info` exists; caches/logs under XDG dirs; strip `libcef.so`
+   (1.4 GB is unstripped).
+3. Flatpak module (sources pinned: glew, freeglut, mpv, CEF archive, this tree
+   with submodules), wired into nyaa-paper's manifest, which already grants
+   read-only access to the Steam assets folder.
+4. Re-run the render audit on a clean build; then black screenshots for
+   web/video, script API gaps, light objects.
+
 ## What is fixed relative to the base commit
 
 1. **Render loop no longer blocks on Wayland frame callbacks.**
@@ -89,7 +121,7 @@ Debug switches (environment, no effect on normal runs):
 ## Known gaps
 
 - screenshots of **web** and **video** wallpapers come out black even though they
-  render on screen (affects thumbnail generation);
+  render on screen (affects only *screenshot on apply* / pywal theming in nyaa-paper; its grid thumbnails come from each wallpaper's preview file);
 - `Light` objects are still unsupported;
 - a few scenes use script APIs (`copy` / `subtract` / `toString` on layer values)
   that resolve to plain objects instead of `Vec3`.
