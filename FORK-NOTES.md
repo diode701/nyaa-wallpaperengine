@@ -153,7 +153,9 @@ Debug switches (environment, no effect on normal runs):
   (host: 2.3.1) and `glewInit` reports "Unknown error" there instead of the
   expected `GLEW_ERROR_NO_GLX_DISPLAY`; try glew 2.3.1 in the manifest.
 - Interactive web wallpapers: clicks DO reach the page on the desktop
-  (user-verified). Web audio: retest with the auto-mute + decoder fixes.
+  (user-verified). Web audio still silent after the auto-mute + decoder
+  fixes (Yui 901759762, Yukino 898361912): Chromium plays its own audio
+  (not through SDL); check whether CEF opens an audio stream at all.
 
 - screenshots of **web** and **video** wallpapers come out black even though they
   render on screen (affects only *screenshot on apply* / pywal theming in nyaa-paper; its grid thumbnails come from each wallpaper's preview file);
