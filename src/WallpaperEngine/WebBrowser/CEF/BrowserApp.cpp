@@ -23,6 +23,12 @@ void BrowserApp::OnBeforeCommandLineProcessing (const CefString& process_type, C
 	"IsolateOrigins,HardwareMediaKeyHandling,WebContentsOcclusion,RendererCodeIntegrityEnabled,site-per-process"
     );
     command_line->AppendSwitch ("--disable-gpu-shader-disk-cache");
+    // web wallpapers render off-screen (OnPaint into a texture), so Chromium
+    // needs no display connection; its default X11 platform fails outright
+    // where there is no $DISPLAY (a Flatpak with Wayland, a pure Wayland session)
+    if (!command_line->HasSwitch ("ozone-platform")) {
+	command_line->AppendSwitchWithValue ("--ozone-platform", "headless");
+    }
     command_line->AppendSwitch ("--disable-site-isolation-trials");
     command_line->AppendSwitch ("--disable-web-security");
     command_line->AppendSwitchWithValue ("--remote-allow-origins", "*");
