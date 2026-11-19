@@ -86,11 +86,10 @@ State on 2026-11-19, branch `nyaa-fixes`. Long-form evidence:
     default) libcef dropped out of its NEEDED list, libc loaded first, and
     Chromium's `dlsym(RTLD_NEXT, "close")` came back empty: every web wallpaper
     aborted in `CefInitialize` with "close symbol missing".
-    Chromium runs with `--ozone-platform=headless` (unless overridden): web
-    wallpapers are rendered off-screen, and the default X11 platform exits
-    when there is no `$DISPLAY`. Its GPU process still fails to initialise
-    EGL in the sandbox (SwANGLE); pages render through the software path.
-    WebGL wallpapers in the sandbox: unverified.
+    Chromium's ozone platform follows the session: `wayland` when
+    `WAYLAND_DISPLAY` is set, else `x11`, else `headless` (X11, the default,
+    exits without `$DISPLAY`; headless has no GL, so its GPU process fails and
+    restarts in a loop: ~80 errors/s and a busy CPU).
 
 ## Building
 

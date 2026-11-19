@@ -1,3 +1,4 @@
+#include <cstdlib>
 #include "BrowserApp.h"
 #include "WallpaperEngine/Logging/Log.h"
 
@@ -23,11 +24,17 @@ void BrowserApp::OnBeforeCommandLineProcessing (const CefString& process_type, C
 	"IsolateOrigins,HardwareMediaKeyHandling,WebContentsOcclusion,RendererCodeIntegrityEnabled,site-per-process"
     );
     command_line->AppendSwitch ("--disable-gpu-shader-disk-cache");
-    // web wallpapers render off-screen (OnPaint into a texture), so Chromium
-    // needs no display connection; its default X11 platform fails outright
-    // where there is no $DISPLAY (a Flatpak with Wayland, a pure Wayland session)
+    // Chromium's default platform is X11, which exits where there is no
+    // $DISPLAY (a Flatpak on Wayland, a pure Wayland session). Pick what the
+    // session offers; headless only as the last resort, since it has no GL
+    // and the GPU process then fails and restarts in a loop.
     if (!command_line->HasSwitch ("ozone-platform")) {
-	command_line->AppendSwitchWithValue ("--ozone-platform", "headless");
+	const char* wayland = std::getenv ("WAYLAND_DISPLAY");
+	const char* x11 = std::getenv ("DISPLAY");
+	const char* platform = (wayland != nullptr && *wayland != '\0') ? "wayland"
+	    : (x11 != nullptr && *x11 != '\0')                         ? "x11"
+								       : "headless";
+	command_line->AppendSwitchWithValue ("--ozone-platform", platform);
     }
     command_line->AppendSwitch ("--disable-site-isolation-trials");
     command_line->AppendSwitch ("--disable-web-security");
