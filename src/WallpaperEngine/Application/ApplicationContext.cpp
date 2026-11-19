@@ -12,6 +12,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string_view>
+#include <vector>
 
 #include <argparse/argparse.hpp>
 
@@ -629,12 +630,33 @@ void ApplicationContext::validateAssets () {
 	return;
     }
 
+    const auto executableDirectory = std::filesystem::canonical ("/proc/self/exe").parent_path ();
+    std::vector<std::filesystem::path> candidates = {};
+
     try {
-	this->settings.general.assets = Steam::FileSystem::appDirectory (APP_DIRECTORY, "assets");
+	candidates.emplace_back (Steam::FileSystem::appDirectory (APP_DIRECTORY, "assets"));
     } catch (std::runtime_error&) {
-	// set current path as assets' folder
-	this->settings.general.assets = std::filesystem::canonical ("/proc/self/exe").parent_path () / "assets";
+	// no Steam installation, try the layouts a packaged build usually has
     }
+
+    // bundled next to the binary (portable/AppImage style)
+    candidates.emplace_back (executableDirectory / "assets");
+    // a distribution/Flatpak layout: <prefix>/share/linux-wallpaperengine/assets
+    candidates.emplace_back (executableDirectory / ".." / "share" / "linux-wallpaperengine" / "assets");
+
+    for (const auto& candidate : candidates) {
+	std::error_code error;
+	if (std::filesystem::exists (candidate, error) && !error) {
+	    this->settings.general.assets = std::filesystem::weakly_canonical (candidate);
+	    sLog.out ("Using wallpaper engine's assets at ", this->settings.general.assets);
+	    return;
+	}
+    }
+
+    // nothing found; keep the legacy fallback so the error message points at a
+    // path the user can actually create
+    this->settings.general.assets = executableDirectory / "assets";
+    sLog.out ("Wallpaper engine assets not found, expected them at ", this->settings.general.assets);
 }
 
 void ApplicationContext::validateScreenshot () const {

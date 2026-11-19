@@ -154,6 +154,8 @@ struct SoundData {
     // TODO: WRITE AN ENUM FOR THIS
     std::optional<std::string> playbackmode;
     std::vector<std::string> sounds;
+    /** Volume of this sound object, 0..1 (multiplied with the global volume) */
+    UserSettingUniquePtr volume;
 };
 
 class Sound : public Object, public SoundData {

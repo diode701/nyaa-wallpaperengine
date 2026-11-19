@@ -49,6 +49,25 @@ private:
     void collectScriptedValues ();
     void registerScriptedValue (const UserSettingUniquePtr& setting);
     void updateScriptedValues ();
+    /**
+     * Visibility of the object itself, folded with the visibility of every
+     * ancestor. Scene objects are a flat list with `parent` links, so a hidden
+     * group only hides its children if the chain is walked explicitly.
+     */
+    [[nodiscard]] bool isVisibleInHierarchy (const Object& object) const;
+    /**
+     * True when another scene object lists this id as a dependency. Those may
+     * be invisible and still be needed as an effect source, so they keep
+     * rendering even when they are not drawn themselves.
+     */
+    [[nodiscard]] bool isDependencySource (int objectId) const;
+    /**
+     * Topmost visible object under a point expressed in cursor world space
+     * (0..scene width, 0..scene height).
+     */
+    [[nodiscard]] CObject* objectAt (const glm::vec2& worldPosition) const;
+    /** Sends cursor enter/leave/move/down/up to the scripts that own objects. */
+    void dispatchMouseEvents ();
 
     std::unique_ptr<Camera> m_camera;
     ObjectUniquePtr m_bloomObjectData;
@@ -60,6 +79,9 @@ private:
     glm::vec2 m_mousePositionLast = {};
     glm::vec2 m_mousePositionNormalized = {};
     glm::vec2 m_parallaxDisplacement = {};
+    std::vector<CObject*> m_hoveredChain = {};
+    glm::vec2 m_mouseWorldLast = {};
+    bool m_mouseDownLast = false;
     std::shared_ptr<const CFBO> _rt_4FrameBuffer = nullptr;
     std::shared_ptr<const CFBO> _rt_8FrameBuffer = nullptr;
     std::shared_ptr<const CFBO> _rt_Bloom = nullptr;

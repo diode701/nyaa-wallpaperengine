@@ -18,6 +18,12 @@ public:
 
     [[nodiscard]] const Text& getText () const;
 
+    /**
+     * Tests a point expressed in scene/world space (0..scene width, 0..scene
+     * height, y pointing down like the cursor globals) against the text quad.
+     */
+    [[nodiscard]] bool hitTest (const glm::vec2& worldPosition) const;
+
 private:
     struct Vertex {
 	float x;

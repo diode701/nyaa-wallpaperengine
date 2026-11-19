@@ -79,6 +79,10 @@ public:
      * @param newRepeat true = repeat, false = no repeat
      */
     void setRepeat (bool newRepeat = true);
+
+    /** Per-stream volume, 0..1. The driver multiplies it with the global one. */
+    void setVolume (float newVolume);
+    [[nodiscard]] float getVolume () const;
     /**
      * @return If the stream is to be repeated at the end or not
      */
@@ -159,6 +163,9 @@ private:
 
     /** The SwrContext that handles resampling */
     SwrContext* m_swrctx = nullptr;
+    /** bytes of the packet currently being fed to the decoder */
+    int m_audioPacketSize = 0;
+    float m_volume = 1.0f;
     /** The audio context this stream will be played under */
     AudioContext& m_audioContext;
     /** If this stream was properly initialized or not */

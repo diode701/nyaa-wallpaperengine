@@ -11,6 +11,8 @@
 #include "WallpaperEngine/Data/Model/ScriptedDynamicValue.h"
 #include "WallpaperEngine/Data/Model/Types.h"
 
+#include <glm/vec2.hpp>
+
 extern "C" {
 #include "quickjs.h"
 }
@@ -50,6 +52,19 @@ public:
     JSValue dynamicValueToJS (const DynamicValue& value) const;
     DynamicValueUniquePtr jsToDynamicValue (JSValue val, DynamicValue::UnderlyingType hint) const;
     void releaseBinding (const void* bindingKey);
+
+    /**
+     * Calls one of the cursor callbacks (cursorDown, cursorUp, cursorMove,
+     * cursorEnter, cursorLeave) on every script bound to the given object.
+     */
+    void dispatchCursorEvent (
+	const char* functionName,
+	WallpaperEngine::Render::Wallpapers::CScene& scene,
+	int objectId,
+	const std::string& objectName,
+	const glm::vec2& worldPosition,
+	const glm::vec2& screenPosition
+    );
 
 private:
     ScriptEngine ();
@@ -105,5 +120,15 @@ private:
     std::chrono::steady_clock::time_point m_lastMediaPoll = {};
     MediaState m_mediaState = {};
     bool m_builtinsInstalled = false;
+    /**
+     * Frame token (the engine clock) for the globals that only change once per
+     * frame. Rebuilding the full scene layer table for every evaluated value
+     * costs tens of thousands of JS objects per frame.
+     */
+    float m_globalsFrame = -1.0f;
+    /** Which object each compiled module belongs to, for cursor dispatch */
+    std::unordered_map<const void*, ScriptBindingContext> m_bindings = {};
+    /** Scene the cached layer table was built for */
+    const WallpaperEngine::Render::Wallpapers::CScene* m_globalsScene = nullptr;
 };
 } // namespace WallpaperEngine::Scripting

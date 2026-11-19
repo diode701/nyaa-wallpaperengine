@@ -24,4 +24,5 @@ int RenderHandler::getWidth () const { return this->m_webdata->getWidth (); }
 
 int RenderHandler::getHeight () const { return this->m_webdata->getHeight (); }
 
-GLuint RenderHandler::texture () const { return this->m_webdata->getWallpaperFramebuffer (); }
+// this is bound as a GL_TEXTURE_2D, so it must be the texture, not the FBO name
+GLuint RenderHandler::texture () const { return this->m_webdata->getWallpaperTexture (); }

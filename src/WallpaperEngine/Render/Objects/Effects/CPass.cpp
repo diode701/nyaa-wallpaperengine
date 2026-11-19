@@ -1,4 +1,7 @@
 #include "CPass.h"
+
+#include <filesystem>
+#include <fstream>
 #include <sstream>
 #include <utility>
 
@@ -564,6 +567,25 @@ void CPass::setupShaders () {
 	this->m_renderable.getAssetLocator (), shaderName, this->m_combos, this->m_override.combos,
 	passTextures, this->m_override.textures, this->m_override.constants
     );
+
+    if (std::getenv ("LWE_SHADER_DEBUG") != nullptr) {
+	std::string combosText;
+
+	for (const auto& [name, value] : this->m_shader->getCombos ()) {
+	    combosText += name + "=" + std::to_string (value) + " ";
+	}
+
+	sLog.out ("Compiling shader ", shaderName, " [", combosText, "]");
+    }
+
+    if (const char* dumpDir = std::getenv ("LWE_SHADER_DUMP"); dumpDir != nullptr) {
+	std::filesystem::create_directories (dumpDir);
+	// one directory per shader name so vertex/fragment pairs stay together
+	const auto base = std::filesystem::path (dumpDir) / (shaderName + "." + std::to_string (this->m_renderable.getId ()));
+	std::filesystem::create_directories (base);
+	std::ofstream (base / "shader.vert") << this->m_shader->vertex ();
+	std::ofstream (base / "shader.frag") << this->m_shader->fragment ();
+    }
 
     const auto [vertex, fragment]
 	= Shaders::GLSLContext::get ().toGlsl (this->m_shader->vertex (), this->m_shader->fragment ());

@@ -1129,3 +1129,18 @@ GLuint CImage::getPassSpacePosition () const { return this->m_passSpacePosition;
 GLuint CImage::getTexCoordCopy () const { return this->m_texcoordCopy; }
 
 GLuint CImage::getTexCoordPass () const { return this->m_texcoordPass; }
+
+bool CImage::hitTest (const glm::vec2& worldPosition) const {
+    const float sceneWidth = static_cast<float> (this->getScene ().getWidth ());
+    const float sceneHeight = static_cast<float> (this->getScene ().getHeight ());
+
+    const float x = worldPosition.x - sceneWidth / 2.0f;
+    const float y = sceneHeight / 2.0f - worldPosition.y;
+
+    const float minX = std::min (this->m_pos.x, this->m_pos.z);
+    const float maxX = std::max (this->m_pos.x, this->m_pos.z);
+    const float minY = std::min (this->m_pos.y, this->m_pos.w);
+    const float maxY = std::max (this->m_pos.y, this->m_pos.w);
+
+    return x >= minX && x <= maxX && y >= minY && y <= maxY;
+}

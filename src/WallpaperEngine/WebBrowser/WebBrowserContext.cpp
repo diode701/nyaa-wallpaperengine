@@ -83,6 +83,10 @@ WebBrowserContext::WebBrowserContext (WallpaperEngine::Application::WallpaperApp
     //  CefString(&settings.browser_subprocess_path) = "path/to/client"
     cef_string_utf8_to_utf16 (cache_path.c_str (), cache_path.length (), &settings.root_cache_path);
     settings.windowless_rendering_enabled = true;
+    // CWeb drives the browser with CefDoMessageLoopWork(); without this flag
+    // that call does nothing and no OnPaint ever arrives, so web wallpapers
+    // stay black
+    settings.external_message_pump = true;
 #if defined(CEF_NO_SANDBOX)
     settings.no_sandbox = true;
 #endif
@@ -96,5 +100,11 @@ WebBrowserContext::WebBrowserContext (WallpaperEngine::Application::WallpaperApp
 
 WebBrowserContext::~WebBrowserContext () {
     sLog.out ("Shutting down CEF");
+
+    // flush anything still queued in the externally pumped loop
+    for (int i = 0; i < 20; ++i) {
+	CefDoMessageLoopWork ();
+    }
+
     CefShutdown ();
 }

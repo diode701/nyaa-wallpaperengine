@@ -1,4 +1,6 @@
 #include "ScriptEngine.h"
+
+#include <fstream>
 #include "WallpaperEngine/Audio/AudioContext.h"
 #include "WallpaperEngine/Audio/Drivers/Recorders/PlaybackRecorder.h"
 #include "WallpaperEngine/Logging/Log.h"
@@ -544,6 +546,29 @@ static void setObjectPropertyFromDynamicValue (JSContext* ctx, JSValue obj, cons
     }
 }
 
+static void logAudioSpectrum (const WallpaperEngine::Audio::Drivers::Recorders::PlaybackRecorder& recorder) {
+    if (std::getenv ("LWE_AUDIO_DEBUG") == nullptr) {
+	return;
+    }
+
+    static auto last = std::chrono::steady_clock::now ();
+    const auto now = std::chrono::steady_clock::now ();
+
+    if (now - last < std::chrono::seconds (1)) {
+	return;
+    }
+
+    last = now;
+
+    double sum = 0.0;
+
+    for (int i = 0; i < 16; ++i) {
+	sum += recorder.audio16[i];
+    }
+
+    sLog.out ("Audio spectrum (16 bands) sum: ", sum);
+}
+
 static void updateAudioArray (JSContext* ctx, JSValue global, const char* name, const float* values, int count) {
     JSValue audio = JS_GetPropertyStr (ctx, global, name);
     if (JS_IsUndefined (audio)) {
@@ -605,6 +630,7 @@ globalThis.Vec3 = class Vec3 {
   divide(v) { const p = __weParts(v); return new Vec3(this.x / p[0], this.y / p[1], this.z / p[2]); }
   dot(v) { return this.x * v.x + this.y * v.y + this.z * v.z; }
   cross(v) { return new Vec3(this.y * v.z - this.z * v.y, this.z * v.x - this.x * v.z, this.x * v.y - this.y * v.x); }
+  reflect(normal) { const n = new Vec3(normal).normalize(); const d = this.dot(n); return new Vec3(this.x - 2 * d * n.x, this.y - 2 * d * n.y, this.z - 2 * d * n.z); }
   mix(v, a) { return new Vec3(this.x + (v.x - this.x) * a, this.y + (v.y - this.y) * a, this.z + (v.z - this.z) * a); }
   min(v) { return new Vec3(Math.min(this.x, v.x), Math.min(this.y, v.y), Math.min(this.z, v.z)); }
   max(v) { return new Vec3(Math.max(this.x, v.x), Math.max(this.y, v.y), Math.max(this.z, v.z)); }
@@ -803,6 +829,11 @@ JSValue ScriptEngine::ensureModule (const void* bindingKey, const std::string& s
 	    << "  mediaPlaybackChanged: typeof mediaPlaybackChanged === 'function' ? mediaPlaybackChanged : null,\n"
 	    << "  mediaTimelineChanged: typeof mediaTimelineChanged === 'function' ? mediaTimelineChanged : null,\n"
 	    << "  mediaThumbnailChanged: typeof mediaThumbnailChanged === 'function' ? mediaThumbnailChanged : null,\n"
+	    << "  cursorDown: typeof cursorDown === 'function' ? cursorDown : null,\n"
+	    << "  cursorUp: typeof cursorUp === 'function' ? cursorUp : null,\n"
+	    << "  cursorMove: typeof cursorMove === 'function' ? cursorMove : null,\n"
+	    << "  cursorEnter: typeof cursorEnter === 'function' ? cursorEnter : null,\n"
+	    << "  cursorLeave: typeof cursorLeave === 'function' ? cursorLeave : null,\n"
 	    << "  setScriptProperties: function(props) { if (typeof scriptProperties !== 'undefined' && scriptProperties) Object.assign(scriptProperties, props); }\n"
 	    << "};\n"
 	    << "})();\n";
@@ -874,8 +905,24 @@ static JSValue jsGetTextureAnimation (JSContext* ctx, JSValueConst, int, JSValue
     return animation;
 }
 
-static void syncLayerObjectProperties (JSContext* ctx, JSValue layer, const Object& object) {
+static void syncLayerObjectProperties (
+    JSContext* ctx, JSValue layer, const Object& object, float sceneWidth, float sceneHeight
+) {
     JS_SetPropertyStr (ctx, layer, "id", JS_NewInt32 (ctx, object.id));
+
+    glm::vec2 objectSize = { 0.0f, 0.0f };
+
+    if (object.is<Image> ()) {
+	objectSize = object.as<Image> ()->size;
+    }
+
+    if (objectSize.x <= 0.0f || objectSize.y <= 0.0f) {
+	// group layers have no size of their own; the canvas is the best
+	// approximation and keeps scripts from dereferencing undefined
+	objectSize = { sceneWidth, sceneHeight };
+    }
+
+    JS_SetPropertyStr (ctx, layer, "size", constructVectorObject (ctx, "Vec3", { objectSize.x, objectSize.y, 0.0 }));
     JS_SetPropertyStr (ctx, layer, "name", JS_NewString (ctx, object.name.c_str ()));
     JS_SetPropertyStr (
 	ctx, layer, "getTextureAnimation", JS_NewCFunction (ctx, jsGetTextureAnimation, "getTextureAnimation", 0)
@@ -895,33 +942,36 @@ static void syncLayerObjectProperties (JSContext* ctx, JSValue layer, const Obje
     }
 }
 
-static JSValue buildLayerObject (JSContext* ctx, const Object& object) {
+static JSValue buildLayerObject (JSContext* ctx, const Object& object, float sceneWidth, float sceneHeight) {
     JSValue layer = JS_NewObject (ctx);
-    syncLayerObjectProperties (ctx, layer, object);
+    syncLayerObjectProperties (ctx, layer, object, sceneWidth, sceneHeight);
 
     return layer;
 }
 
-static void installSceneLayers (
-    JSContext* ctx,
-    JSValue global,
-    WallpaperEngine::Render::Wallpapers::CScene* scene,
-    const ScriptBindingContext* bindingContext
+/**
+ * Builds the `__layers` / `__layerList` tables. This is the expensive part of a
+ * script evaluation (a JS object per scene object plus its properties), so it
+ * runs once per frame instead of once per evaluated value.
+ */
+static void rebuildSceneLayers (
+    JSContext* ctx, JSValue global, WallpaperEngine::Render::Wallpapers::CScene* scene
 ) {
     JSValue layers = JS_NewObject (ctx);
 
     JSValue layerList = JS_NewArray (ctx);
-    JSValue ownerLayer = JS_UNDEFINED;
 
     if (scene) {
+	const float sceneWidth = static_cast<float> (scene->getWidth ());
+	const float sceneHeight = static_cast<float> (scene->getHeight ());
 	uint32_t layerIndex = 0;
 	for (const auto& object : scene->getScene ().objects) {
 	    JSValue layer = JS_GetPropertyStr (ctx, layers, std::to_string (object->id).c_str ());
 	    if (JS_IsUndefined (layer) || JS_IsException (layer)) {
 		JS_FreeValue (ctx, layer);
-		layer = buildLayerObject (ctx, *object);
+		layer = buildLayerObject (ctx, *object, sceneWidth, sceneHeight);
 	    } else {
-		syncLayerObjectProperties (ctx, layer, *object);
+		syncLayerObjectProperties (ctx, layer, *object, sceneWidth, sceneHeight);
 	    }
 
 	    JS_SetPropertyStr (ctx, layers, std::to_string (object->id).c_str (), JS_DupValue (ctx, layer));
@@ -930,21 +980,72 @@ static void installSceneLayers (
 		JS_SetPropertyStr (ctx, layers, object->name.c_str (), JS_DupValue (ctx, layer));
 	    }
 
-	    if (bindingContext
-		&& (object->id == bindingContext->objectId || object->name == bindingContext->objectName)) {
-		ownerLayer = JS_DupValue (ctx, layer);
-	    }
-
 	    JS_FreeValue (ctx, layer);
 	}
     }
 
-    if (JS_IsUndefined (ownerLayer)) {
-	ownerLayer = JS_NewObject (ctx);
-    }
-
     JS_SetPropertyStr (ctx, global, "__layers", layers);
     JS_SetPropertyStr (ctx, global, "__layerList", layerList);
+}
+
+/**
+ * A script can be evaluated without an owning object (project-level values that
+ * were written as layer scripts). Those still expect thisLayer to look like a
+ * layer, so give them one instead of an empty object; otherwise every
+ * thisLayer.origin.copy() / .subtract() / .toString() throws.
+ */
+static JSValue buildDefaultLayerObject (JSContext* ctx) {
+    JSValue layer = JS_NewObject (ctx);
+
+    JS_SetPropertyStr (ctx, layer, "id", JS_NewInt32 (ctx, -1));
+    JS_SetPropertyStr (ctx, layer, "name", JS_NewString (ctx, ""));
+    JS_SetPropertyStr (ctx, layer, "origin", constructVectorObject (ctx, "Vec3", { 0.0, 0.0, 0.0 }));
+    JS_SetPropertyStr (ctx, layer, "scale", constructVectorObject (ctx, "Vec3", { 1.0, 1.0, 1.0 }));
+    JS_SetPropertyStr (ctx, layer, "angles", constructVectorObject (ctx, "Vec3", { 0.0, 0.0, 0.0 }));
+    JS_SetPropertyStr (ctx, layer, "size", constructVectorObject (ctx, "Vec3", { 0.0, 0.0, 0.0 }));
+    JS_SetPropertyStr (ctx, layer, "parallaxDepth", constructVectorObject (ctx, "Vec2", { 0.0, 0.0 }));
+    JS_SetPropertyStr (ctx, layer, "color", constructVectorObject (ctx, "Vec3", { 1.0, 1.0, 1.0 }));
+    JS_SetPropertyStr (ctx, layer, "visible", JS_NewBool (ctx, true));
+    JS_SetPropertyStr (ctx, layer, "alpha", JS_NewFloat64 (ctx, 1.0));
+    JS_SetPropertyStr (ctx, layer, "text", JS_NewString (ctx, ""));
+    JS_SetPropertyStr (ctx, layer, "pointSize", JS_NewFloat64 (ctx, 12.0));
+    JS_SetPropertyStr (
+	ctx, layer, "getTextureAnimation", JS_NewCFunction (ctx, jsGetTextureAnimation, "getTextureAnimation", 0)
+    );
+    JS_SetPropertyStr (ctx, layer, "getAnimation", JS_NewCFunction (ctx, jsGetTextureAnimation, "getAnimation", 0));
+
+    return layer;
+}
+
+/**
+ * Points thisLayer/thisObject at the object that owns the value being
+ * evaluated. Cheap enough to run for every evaluation.
+ */
+static void bindSceneLayerForObject (
+    JSContext* ctx, JSValue global, const ScriptBindingContext* bindingContext
+) {
+    JSValue ownerLayer = JS_UNDEFINED;
+
+    if (bindingContext != nullptr) {
+	JSValue layers = JS_GetPropertyStr (ctx, global, "__layers");
+
+	if (JS_IsObject (layers)) {
+	    ownerLayer = JS_GetPropertyStr (ctx, layers, std::to_string (bindingContext->objectId).c_str ());
+
+	    if (JS_IsUndefined (ownerLayer) && !bindingContext->objectName.empty ()) {
+		JS_FreeValue (ctx, ownerLayer);
+		ownerLayer = JS_GetPropertyStr (ctx, layers, bindingContext->objectName.c_str ());
+	    }
+	}
+
+	JS_FreeValue (ctx, layers);
+    }
+
+    if (JS_IsUndefined (ownerLayer)) {
+	JS_FreeValue (ctx, ownerLayer);
+	ownerLayer = buildDefaultLayerObject (ctx);
+    }
+
     JS_SetPropertyStr (ctx, global, "thisObject", JS_DupValue (ctx, ownerLayer));
     JS_SetPropertyStr (ctx, global, "thisLayer", ownerLayer);
 }
@@ -975,7 +1076,8 @@ static void applyLayerUpdates (
     JSContext* ctx,
     ScriptEngine& engine,
     JSValue global,
-    WallpaperEngine::Render::Wallpapers::CScene* scene
+    WallpaperEngine::Render::Wallpapers::CScene* scene,
+    const ScriptBindingContext* onlyFor
 ) {
     if (!scene) {
 	return;
@@ -988,6 +1090,12 @@ static void applyLayerUpdates (
     }
 
     for (const auto& object : scene->getScene ().objects) {
+	// syncing every layer after every single script is what made this
+	// quadratic; without a filter only the current frame does the full sweep
+	if (onlyFor != nullptr && object->id != onlyFor->objectId && object->name != onlyFor->objectName) {
+	    continue;
+	}
+
 	JSValue layer = JS_GetPropertyStr (ctx, layers, std::to_string (object->id).c_str ());
 	if (JS_IsUndefined (layer)) {
 	    JS_FreeValue (ctx, layer);
@@ -1197,6 +1305,7 @@ void ScriptEngine::updateSceneInputGlobals (JSContext* ctx, JSValue globalObj, W
     updateAudioArray (ctx, globalObj, "__audio16", recorder.audio16, 16);
     updateAudioArray (ctx, globalObj, "__audio32", recorder.audio32, 32);
     updateAudioArray (ctx, globalObj, "__audio64", recorder.audio64, 64);
+    logAudioSpectrum (recorder);
 
     JSValue input = JS_GetPropertyStr (ctx, globalObj, "input");
     if (JS_IsUndefined (input) || JS_IsException (input)) {
@@ -1212,6 +1321,18 @@ void ScriptEngine::updateSceneInputGlobals (JSContext* ctx, JSValue globalObj, W
     JS_SetPropertyStr (ctx, input, "cursorPosition", this->dynamicValueToJS (cursorPosition));
     JS_SetPropertyStr (ctx, input, "cursorWorldPosition", this->dynamicValueToJS (cursorWorldPosition));
     JS_SetPropertyStr (ctx, globalObj, "input", input);
+
+    // scripts clamp dragged layers with engine.canvasSize; without it every
+    // cursorMove handler throws
+    JSValue engine = JS_GetPropertyStr (ctx, globalObj, "engine");
+    JS_SetPropertyStr (
+	ctx, engine, "canvasSize",
+	constructVectorObject (ctx, "Vec3", { static_cast<double> (scene->getWidth ()),
+					      static_cast<double> (scene->getHeight ()), 0.0 })
+    );
+    JS_SetPropertyStr (ctx, engine, "canvasWidth", JS_NewInt32 (ctx, scene->getWidth ()));
+    JS_SetPropertyStr (ctx, engine, "canvasHeight", JS_NewInt32 (ctx, scene->getHeight ()));
+    JS_FreeValue (ctx, engine);
 }
 
 void ScriptEngine::callModuleWithProps (JSContext* ctx, JSValue module, const char* name, JSValue propsObj) const {
@@ -1355,7 +1476,14 @@ DynamicValueUniquePtr ScriptEngine::resolveEvaluationResult (
     const ScriptBindingContext* bindingContext
 ) const {
     if (JS_IsException (result)) {
-	logJSException (ctx, "update");
+	std::string exceptionContext = "update";
+
+	if (bindingContext != nullptr) {
+	    exceptionContext += " object=" + std::to_string (bindingContext->objectId) + " '" + bindingContext->objectName
+		+ "' property=" + bindingContext->propertyName;
+	}
+
+	logJSException (ctx, exceptionContext.c_str ());
 	JS_FreeValue (ctx, result);
 	auto fallback = std::make_unique<DynamicValue> ();
 	fallback->update (currentValue);
@@ -1404,12 +1532,28 @@ DynamicValueUniquePtr ScriptEngine::evaluate (
     const std::string bindingKeyString = std::to_string (reinterpret_cast<uintptr_t> (bindingKey));
     JS_SetPropertyStr (ctx, globalObj, "__currentBindingKey", JS_NewString (ctx, bindingKeyString.c_str ()));
 
-    this->updateRuntimeGlobals (ctx, globalObj);
-    this->updateSceneInputGlobals (ctx, globalObj, scene);
+    // The runtime/audio/cursor globals and the scene layer table depend on the
+    // frame, not on the value being evaluated. Rebuilding them for every value
+    // dominated the frame time, so do it once per frame (or when the scene
+    // changes) and only re-bind thisLayer per evaluation.
+    const bool newFrame = this->m_globalsFrame != g_Time || this->m_globalsScene != scene;
+
+    if (newFrame) {
+	this->m_globalsFrame = g_Time;
+	this->m_globalsScene = scene;
+
+	this->updateRuntimeGlobals (ctx, globalObj);
+	this->updateSceneInputGlobals (ctx, globalObj, scene);
+	rebuildSceneLayers (ctx, globalObj, scene);
+    }
 
     JSValue propsObj = buildScriptPropertiesObject (ctx, *this, scriptProperties);
     JS_SetPropertyStr (ctx, globalObj, "__scriptProps", JS_DupValue (ctx, propsObj));
-    installSceneLayers (ctx, globalObj, scene, bindingContext);
+    bindSceneLayerForObject (ctx, globalObj, bindingContext);
+
+    if (bindingContext != nullptr) {
+	this->m_bindings[bindingKey] = *bindingContext;
+    }
 
     JSValue module = this->ensureModule (bindingKey, scriptSource);
     this->logTextEvaluationDebug (bindingContext);
@@ -1422,8 +1566,21 @@ DynamicValueUniquePtr ScriptEngine::evaluate (
     this->runIntervals (ctx, globalObj, bindingKeyString);
 
     JSValue result = this->callUpdate (ctx, module, currentValue);
+
+    if (JS_IsException (result) && std::getenv ("LWE_SCRIPT_DEBUG") != nullptr) {
+	sLog.error (
+	    "Update failed key=", reinterpret_cast<uintptr_t> (bindingKey),
+	    " object=", (bindingContext != nullptr ? bindingContext->objectId : -1),
+	    " name=", (bindingContext != nullptr ? bindingContext->objectName : std::string ("<none>")),
+	    " property=", (bindingContext != nullptr ? bindingContext->propertyName : std::string ("<none>")),
+	    " source=", scriptSource.substr (0, 400)
+	);
+    }
+
     if (!JS_IsException (result)) {
-	applyLayerUpdates (ctx, *this, globalObj, scene);
+	// the first evaluation of a frame writes back every layer (scripts may
+	// have edited shared state); the rest only touch their own object
+	applyLayerUpdates (ctx, *this, globalObj, scene, newFrame ? nullptr : bindingContext);
     }
 
     JS_SetPropertyStr (ctx, globalObj, "__scriptProps", JS_UNDEFINED);
@@ -1431,4 +1588,90 @@ DynamicValueUniquePtr ScriptEngine::evaluate (
     JS_FreeValue (ctx, propsObj);
 
     return this->resolveEvaluationResult (ctx, result, scriptSource, currentValue, scene, bindingContext);
+}
+
+void ScriptEngine::dispatchCursorEvent (
+    const char* functionName,
+    WallpaperEngine::Render::Wallpapers::CScene& scene,
+    int objectId,
+    const std::string& objectName,
+    const glm::vec2& worldPosition,
+    const glm::vec2& screenPosition
+) {
+    if (!this->m_context || this->m_bindings.empty ()) {
+	return;
+    }
+
+    JSContext* ctx = this->m_context;
+    JSValue global = JS_GetGlobalObject (ctx);
+
+    for (const auto& [bindingKey, binding] : this->m_bindings) {
+	if (binding.objectId != objectId && binding.objectName != objectName) {
+	    continue;
+	}
+
+	const auto moduleIt = this->m_modules.find (bindingKey);
+
+	if (moduleIt == this->m_modules.end ()) {
+	    continue;
+	}
+
+	JSValue function = JS_GetPropertyStr (ctx, moduleIt->second, functionName);
+
+	if (!JS_IsFunction (ctx, function)) {
+	    JS_FreeValue (ctx, function);
+	    continue;
+	}
+
+	// the handlers use thisLayer/thisObject, and they expect the cursor to be
+	// where the event says it is
+	JS_SetPropertyStr (
+	    ctx, global, "__currentBindingKey", JS_NewString (ctx, std::to_string (reinterpret_cast<uintptr_t> (bindingKey)).c_str ())
+	);
+	bindSceneLayerForObject (ctx, global, &binding);
+
+	JSValue event = JS_NewObject (ctx);
+	JS_SetPropertyStr (
+	    ctx, event, "worldPosition",
+	    constructVectorObject (ctx, "Vec3", { worldPosition.x, worldPosition.y, 0.0 })
+	);
+	JS_SetPropertyStr (
+	    ctx, event, "screenPosition",
+	    constructVectorObject (ctx, "Vec2", { screenPosition.x, screenPosition.y })
+	);
+	JS_SetPropertyStr (ctx, event, "button", JS_NewInt32 (ctx, 0));
+
+	JSValue result = JS_Call (ctx, function, JS_UNDEFINED, 1, &event);
+
+	if (JS_IsException (result)) {
+	    logJSException (ctx, functionName);
+	}
+
+	if (std::getenv ("LWE_CURSOR_DEBUG") != nullptr) {
+	    const char* probe = "(typeof thisLayer.scale)+'|'+(typeof thisLayer.size)+'|'+(typeof engine.canvasSize)"
+				"+'|'+(typeof thisLayer.origin)";
+	    JSValue probeResult = JS_Eval (ctx, probe, strlen (probe), "<probe>", JS_EVAL_TYPE_GLOBAL);
+	    const char* probeText = JS_ToCString (ctx, probeResult);
+
+	    sLog.out (
+		"Cursor event ", functionName, " object=", objectId, " world=", worldPosition.x, ",", worldPosition.y,
+		" types=", (probeText != nullptr ? probeText : "?")
+	    );
+
+	    if (probeText != nullptr) {
+		JS_FreeCString (ctx, probeText);
+	    }
+
+	    JS_FreeValue (ctx, probeResult);
+	}
+
+	JS_FreeValue (ctx, result);
+	JS_FreeValue (ctx, event);
+	JS_FreeValue (ctx, function);
+
+	// let a drag handler move the layer straight away
+	applyLayerUpdates (ctx, *this, global, &scene, &binding);
+    }
+
+    JS_FreeValue (ctx, global);
 }

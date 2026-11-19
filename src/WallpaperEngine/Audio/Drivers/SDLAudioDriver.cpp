@@ -1,4 +1,6 @@
 #include "SDLAudioDriver.h"
+
+#include <cstdlib>
 #include "WallpaperEngine/Logging/Log.h"
 
 #define SDL_AUDIO_BUFFER_SIZE 4096
@@ -58,9 +60,14 @@ void audio_callback (void* userdata, uint8_t* streamData, int length) {
 	    }
 
 	    // mix the audio
+	    // global volume is 0..128, per-stream volume 0..1
+	    const int effectiveVolume = static_cast<int> (
+		driver->getApplicationContext ().state.audio.volume * buffer->stream->getVolume ()
+	    );
+
 	    SDL_MixAudioFormat (
 		streamDataPointer, &buffer->audio_buf[buffer->audio_buf_index], driver->getSpec ().format, len1,
-		driver->getApplicationContext ().state.audio.volume
+		effectiveVolume
 	    );
 
 	    streamLength -= len1;
@@ -78,6 +85,20 @@ SDLAudioDriver::SDLAudioDriver (
     Recorders::PlaybackRecorder& recorder
 ) : AudioDriver (applicationContext, detector, recorder), m_audioSpec () {
     this->m_streamListMutex = SDL_CreateMutex ();
+
+    // Debugging aid: sanitizer runs die inside the third-party audio stack, so
+    // allow keeping the driver object without ever opening a device.
+    if (std::getenv ("LWE_NO_AUDIO_DEVICE") != nullptr) {
+	// keep a valid format so audio streams can still be mixed, just never open
+	// a device
+	this->m_audioSpec = { .freq = 48000,
+			      .format = AUDIO_F32,
+			      .channels = 2,
+			      .samples = SDL_AUDIO_BUFFER_SIZE,
+			      .callback = audio_callback,
+			      .userdata = this };
+	return;
+    }
 
     if (SDL_InitSubSystem (SDL_INIT_AUDIO) < 0) {
 	sLog.error ("Cannot initialize SDL audio system, SDL_GetError: ", SDL_GetError ());

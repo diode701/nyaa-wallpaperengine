@@ -90,10 +90,10 @@ static void surfaceFrameCallback (void* data, struct wl_callback* cb, uint32_t t
 
     wl_callback_destroy (cb);
 
+    // Pacing only. The driver renders on its own timer so a compositor that
+    // stops sending frame callbacks (occluded/moved surface) cannot stall the
+    // engine; rendering here as well would draw every frame twice.
     viewport->frameCallback = nullptr;
-    viewport->rendering = true;
-    viewport->getDriver ()->getApp ().update (viewport);
-    viewport->rendering = false;
 }
 
 constexpr struct wl_callback_listener frameListener = { .done = surfaceFrameCallback };
@@ -194,6 +194,14 @@ void WaylandOutputViewport::swapOutput () {
     this->callbackInitialized = true;
 
     this->makeCurrent ();
+
+    // the previous callback may still be pending when the compositor stopped
+    // replying; drop it before requesting a new one so the pointer stays valid
+    if (this->frameCallback != nullptr) {
+	wl_callback_destroy (this->frameCallback);
+	this->frameCallback = nullptr;
+    }
+
     frameCallback = wl_surface_frame (surface);
     wl_callback_add_listener (frameCallback, &frameListener, this);
     eglSwapBuffers (m_driver->getEGLContext ()->display, this->eglSurface);

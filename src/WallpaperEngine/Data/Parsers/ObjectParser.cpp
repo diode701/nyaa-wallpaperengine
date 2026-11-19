@@ -91,7 +91,7 @@ ObjectUniquePtr ObjectParser::parse (const JSON& it, const Project& project) {
     if (imageIt != it.end () && imageIt->is_string ()) {
 	return parseImage (it, project, std::move (basedata), *imageIt);
     } else if (soundIt != it.end () && soundIt->is_array ()) {
-	return parseSound (it, std::move (basedata));
+	return parseSound (it, project, std::move (basedata));
     } else if (particleIt != it.end ()) {
 	return parseParticle (it, project, std::move (basedata));
     } else if (textIt != it.end ()) {
@@ -100,10 +100,10 @@ ObjectUniquePtr ObjectParser::parse (const JSON& it, const Project& project) {
 	sLog.error ("Light objects are not supported yet");
     } else {
 	if (!it.optional ("solid", false)) {
-	    // dump the object for now, might want to change later
-	    // TODO: RE-EVALUATE IF THIS MAKES SENSE, THERE'S OBJECTS THAT CONTAIN OTHER OBJECTS AND THUS AREN'T REALLY
-	    // ANYTHING SPECIAL
-	    sLog.error ("Unknown object type found: ", it.dump ());
+	    // Objects without a type are containers: they only carry a transform
+	    // and visibility for their children. They are parsed as a plain Object
+	    // and resolved through the parent chain, so this is not an error.
+	    sLog.debug ("Group object without a type: ", basedata.id, " ", basedata.name);
 	}
     }
 
@@ -126,7 +126,7 @@ std::vector<int> ObjectParser::parseDependencies (const JSON& it) {
     return result;
 }
 
-SoundUniquePtr ObjectParser::parseSound (const JSON& it, ObjectData base) {
+SoundUniquePtr ObjectParser::parseSound (const JSON& it, const Project& project, ObjectData base) {
     const auto soundIt = it.require ("sound", "Object must have a sound");
     std::vector<std::string> sounds = {};
 
@@ -134,11 +134,15 @@ SoundUniquePtr ObjectParser::parseSound (const JSON& it, ObjectData base) {
 	sounds.push_back (cur);
     }
 
+    auto volume = it.user ("volume", project.properties, 1.0f);
+    bindScriptContext (volume, base.id, base.name, "volume");
+
     return std::make_unique<Sound> (
 	std::move (base),
 	SoundData {
 	    .playbackmode = it.optional<std::string> ("playbackmode"),
 	    .sounds = sounds,
+	    .volume = std::move (volume),
 	}
     );
 }

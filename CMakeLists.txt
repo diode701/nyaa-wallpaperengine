@@ -121,6 +121,15 @@ find_package(CEF REQUIRED)
 list(REMOVE_ITEM CEF_CXX_COMPILER_FLAGS -fno-exceptions)
 list(REMOVE_ITEM CEF_CXX_COMPILER_FLAGS -fno-rtti)
 list(REMOVE_ITEM CEF_CXX_COMPILER_FLAGS -std=c++17)
+# Chromium is built without thread-safe statics; our library is not, and
+# glslang's internals corrupt themselves when compiled that way (-fno-threadsafe-statics
+# crashed shader compilation in two workshop wallpapers)
+list(REMOVE_ITEM CEF_CXX_COMPILER_FLAGS -fno-threadsafe-statics)
+# Chromium's flags include clang-only switches; keeping -Werror here makes the
+# build fail on other compilers (GCC 15 warns about -Wno-undefined-var-template)
+list(REMOVE_ITEM CEF_COMPILER_FLAGS -Werror)
+list(REMOVE_ITEM CEF_CXX_COMPILER_FLAGS -Werror)
+list(REMOVE_ITEM CEF_COMPILER_FLAGS -fno-threadsafe-statics)
 list(REMOVE_ITEM CEF_COMPILER_FLAGS -fvisibility=hidden)
 list(REMOVE_ITEM CEF_COMPILER_FLAGS -fvisibility-inlines-hidden)
 list(APPEND CEF_CXX_COMPILER_FLAGS -std=c++20)

@@ -38,6 +38,13 @@ public:
     [[nodiscard]] const Effects::CMaterial* getMaterial () const;
     [[nodiscard]] glm::vec2 getSize () const;
 
+    /**
+     * Tests a point expressed in scene/world space (0..scene width, 0..scene
+     * height, y pointing down like the cursor globals) against this image's
+     * on-screen quad.
+     */
+    [[nodiscard]] bool hitTest (const glm::vec2& worldPosition) const;
+
     [[nodiscard]] GLuint getSceneSpacePosition () const;
     [[nodiscard]] GLuint getCopySpacePosition () const;
     [[nodiscard]] GLuint getPassSpacePosition () const;

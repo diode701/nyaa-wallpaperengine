@@ -2,6 +2,9 @@
 // https://github.com/if1live/cef-gl-example
 // https://github.com/andmcgregor/cefgui
 #include "CWeb.h"
+
+#include <chrono>
+#include <thread>
 #include "WallpaperEngine/WebBrowser/CEF/WPSchemeHandlerFactory.h"
 
 #include "WallpaperEngine/Data/Model/Project.h"
@@ -116,8 +119,23 @@ void CWeb::updateMouse (const glm::ivec4& viewport) {
 }
 
 CWeb::~CWeb () {
-    CefDoMessageLoopWork ();
-    this->m_browser->GetHost ()->CloseBrowser (true);
+    if (this->m_browser != nullptr) {
+	this->m_browser->GetHost ()->CloseBrowser (true);
 
-    delete this->m_renderHandler;
+	// With an externally pumped message loop nothing else drains the close
+	// events, and CefShutdown would then block forever waiting for the
+	// browser to go away
+	for (int i = 0; i < 100; ++i) {
+	    CefDoMessageLoopWork ();
+	    std::this_thread::sleep_for (std::chrono::milliseconds (5));
+	}
+    }
+
+    CefDoMessageLoopWork ();
+
+    // RenderHandler is refcounted by CEF (BrowserClient holds a CefRefPtr), so
+    // deleting it here corrupts the reference count and the next virtual call
+    // goes through a dead vtable
+    this->m_renderHandler = nullptr;
+    this->m_client = nullptr;
 }

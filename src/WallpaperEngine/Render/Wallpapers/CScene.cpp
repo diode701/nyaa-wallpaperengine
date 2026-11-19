@@ -10,7 +10,11 @@
 
 #include "WallpaperEngine/Data/Model/Wallpaper.h"
 #include "WallpaperEngine/Data/Parsers/ObjectParser.h"
+#include "WallpaperEngine/Input/InputContext.h"
+#include "WallpaperEngine/Scripting/ScriptEngine.h"
 
+#include <chrono>
+#include <cstdlib>
 #include <ranges>
 
 extern float g_Time;
@@ -47,6 +51,20 @@ Render::CObject* createParticleObject (CScene& scene, const Particle& particleDa
 	sLog.error ("Cannot setup particle ", particle->getParticle ().name);
     }
     return particle;
+}
+
+bool ownVisibility (const Object& object) {
+    if (object.is<Image> ()) {
+	return object.as<Image> ()->visible->value->getBool ();
+    }
+    if (object.is<Text> ()) {
+	return object.as<Text> ()->visible->value->getBool ();
+    }
+    if (object.is<Particle> ()) {
+	return object.as<Particle> ()->visible->value->getBool ();
+    }
+    // group/container objects keep their transforms and visibility in the base fields
+    return object.groupVisible->value->getBool ();
 }
 }
 
@@ -341,11 +359,165 @@ void CScene::updateScriptedValues () {
 
 Camera& CScene::getCamera () const { return *this->m_camera; }
 
+CObject* CScene::objectAt (const glm::vec2& worldPosition) const {
+    // last drawn wins: the render order is back-to-front
+    for (auto it = this->m_objectsByRenderOrder.rbegin (); it != this->m_objectsByRenderOrder.rend (); ++it) {
+	CObject* object = *it;
+
+	// the bloom object is a synthetic full-screen layer, never a hit target
+	if (object == nullptr || object == this->m_bloomObject
+	    || !this->isVisibleInHierarchy (object->getObject ())) {
+	    continue;
+	}
+
+	if (object->is<Objects::CImage> ()) {
+	    if (object->as<Objects::CImage> ()->hitTest (worldPosition)) {
+		return object;
+	    }
+	} else if (object->is<Objects::CText> ()) {
+	    if (object->as<Objects::CText> ()->hitTest (worldPosition)) {
+		return object;
+	    }
+	}
+    }
+
+    return nullptr;
+}
+
+void CScene::dispatchMouseEvents () {
+    const auto& mouse = this->getContext ().getInputContext ().getMouseInput ();
+    const glm::vec2 world = {
+	this->m_mousePosition.x * static_cast<float> (this->getWidth ()),
+	this->m_mousePosition.y * static_cast<float> (this->getHeight ()),
+    };
+
+    auto& scripts = WallpaperEngine::Scripting::ScriptEngine::instance ();
+
+    // A script can live on a group while the pixels under the cursor belong to
+    // one of its children, so the event goes to the hit object and then up the
+    // whole parent chain. Modules that do not export the callback are skipped.
+    std::vector<CObject*> chain = {};
+    CObject* hovered = this->objectAt (world);
+
+    for (CObject* current = hovered; current != nullptr;) {
+	chain.push_back (current);
+
+	const auto& data = current->getObject ();
+
+	if (!data.parent.has_value ()) {
+	    break;
+	}
+
+	current = const_cast<CObject*> (this->getObject (data.parent.value ()));
+    }
+
+    if (std::getenv ("LWE_CURSOR_DEBUG") != nullptr) {
+	std::string chainText;
+
+	for (const CObject* object : chain) {
+	    chainText += std::to_string (object->getId ()) + " ";
+	}
+
+	sLog.out (
+	    "Cursor: normalized=", this->m_mousePosition.x, ",", this->m_mousePosition.y,
+	    " world=", world.x, ",", world.y,
+	    " scene=", this->getWidth (), "x", this->getHeight (),
+	    " chain=", chainText
+	);
+    }
+
+    const auto dispatchTo = [&] (const char* functionName, const std::vector<CObject*>& objects) {
+	for (CObject* object : objects) {
+	    scripts.dispatchCursorEvent (
+		functionName, *this, object->getId (), object->getObject ().name, world, this->m_mousePosition
+	    );
+	}
+    };
+
+    const bool chainChanged = chain != this->m_hoveredChain;
+
+    if (chainChanged) {
+	for (CObject* object : this->m_hoveredChain) {
+	    if (std::ranges::find (chain, object) == chain.end ()) {
+		dispatchTo ("cursorLeave", { object });
+	    }
+	}
+
+	for (CObject* object : chain) {
+	    if (std::ranges::find (this->m_hoveredChain, object) == this->m_hoveredChain.end ()) {
+		dispatchTo ("cursorEnter", { object });
+	    }
+	}
+
+	this->m_hoveredChain = chain;
+    }
+
+    if (!chain.empty () && world != this->m_mouseWorldLast) {
+	dispatchTo ("cursorMove", chain);
+    }
+
+    const bool down = mouse.leftClick () == WallpaperEngine::Input::MouseClickStatus::Clicked
+	|| std::getenv ("LWE_FAKE_CLICK") != nullptr;
+
+    if (down != this->m_mouseDownLast) {
+	if (!chain.empty ()) {
+	    dispatchTo (down ? "cursorDown" : "cursorUp", chain);
+	}
+
+	this->m_mouseDownLast = down;
+    }
+
+    this->m_mouseWorldLast = world;
+}
+
+bool CScene::isVisibleInHierarchy (const Object& object) const {
+    constexpr int kMaxParentDepth = 32;
+
+    const Object* current = &object;
+
+    for (int depth = 0; current != nullptr && depth < kMaxParentDepth; ++depth) {
+	if (!ownVisibility (*current)) {
+	    return false;
+	}
+
+	if (!current->parent.has_value ()) {
+	    break;
+	}
+
+	const CObject* parent = this->getObject (current->parent.value ());
+	current = parent != nullptr ? &parent->getObject () : nullptr;
+    }
+
+    return true;
+}
+
+bool CScene::isDependencySource (int objectId) const {
+    for (const auto& object : this->getScene ().objects) {
+	if (object->id == objectId) {
+	    continue;
+	}
+
+	if (std::ranges::find (object->dependencies, objectId) != object->dependencies.end ()) {
+	    return true;
+	}
+    }
+
+    return false;
+}
+
 void CScene::renderFrame (const glm::ivec4& viewport) {
     // ensure the virtual mouse position is up to date
     this->updateMouse (viewport);
 
+    auto profileStart = std::chrono::steady_clock::now ();
+
     this->updateScriptedValues ();
+
+    auto profileAfterScripts = std::chrono::steady_clock::now ();
+
+    // feed pointer changes to the scripts that own the affected objects; this
+    // has to happen after the frame's globals (__layers, cursor position) exist
+    this->dispatchMouseEvents ();
 
     // update the parallax position if required
     if (this->getScene ().camera.parallax.enabled->value->getBool ()
@@ -382,6 +554,8 @@ void CScene::renderFrame (const glm::ivec4& viewport) {
 #endif
     }
 
+    auto profileAfterTextures = std::chrono::steady_clock::now ();
+
     // bind the vertex array
     glBindVertexArray (this->m_vaoBuffer);
     // use the scene's framebuffer by default
@@ -400,7 +574,45 @@ void CScene::renderFrame (const glm::ivec4& viewport) {
 	    continue;
 	}
 
+	// a hidden object must not draw, but an object used as an effect source by
+	// a visible one still has to run so its framebuffer is up to date
+	const auto& object = cur->getObject ();
+
+	if (!this->isVisibleInHierarchy (object) && !this->isDependencySource (object.id)) {
+	    continue;
+	}
+
 	cur->render ();
+    }
+
+    auto profileEnd = std::chrono::steady_clock::now ();
+
+    if (std::getenv ("LWE_PROFILE") != nullptr) {
+	static auto windowStart = std::chrono::steady_clock::now ();
+	static double scriptMs = 0.0;
+	static double textureMs = 0.0;
+	static double objectMs = 0.0;
+	static int frames = 0;
+
+	const auto toMs = [] (std::chrono::steady_clock::duration value) {
+	    return std::chrono::duration<double, std::milli> (value).count ();
+	};
+
+	scriptMs += toMs (profileAfterScripts - profileStart);
+	textureMs += toMs (profileAfterTextures - profileAfterScripts);
+	objectMs += toMs (profileEnd - profileAfterTextures);
+	++frames;
+
+	if (profileEnd - windowStart >= std::chrono::seconds (1)) {
+	    sLog.out (
+		"Scene profile: ", frames, " frames, scripts ", static_cast<int> (scriptMs), "ms, textures ",
+		static_cast<int> (textureMs), "ms, objects ", static_cast<int> (objectMs), "ms"
+	    );
+
+	    windowStart = profileEnd;
+	    scriptMs = textureMs = objectMs = 0.0;
+	    frames = 0;
+	}
     }
 }
 
@@ -431,6 +643,22 @@ void CScene::updateMouse (const glm::ivec4& viewport) {
 
     this->m_mousePosition.x = this->m_mousePositionNormalized.x;
     this->m_mousePosition.y = uvs.vstart + mouseY * (uvs.vend - uvs.vstart);
+
+    // headless testing hook: pretend the pointer sits at a fixed spot
+    if (const char* fake = std::getenv ("LWE_FAKE_CURSOR"); fake != nullptr) {
+	float fakeX = 0.0f;
+	float fakeY = 0.0f;
+
+	if (std::sscanf (fake, "%f,%f", &fakeX, &fakeY) == 2) {
+	    // optional: sweep the fake pointer so drag handlers can be exercised
+	    if (std::getenv ("LWE_FAKE_CURSOR_ANIMATE") != nullptr) {
+		fakeX += 0.12f * std::sin (g_Time * 1.5f);
+	    }
+
+	    this->m_mousePositionNormalized = { fakeX, fakeY };
+	    this->m_mousePosition = { fakeX, fakeY };
+	}
+    }
 }
 
 const Scene& CScene::getScene () const { return *this->getWallpaperData ().as<Scene> (); }

@@ -200,11 +200,7 @@ ProjectUniquePtr WallpaperApplication::loadBackground (const std::string& bg) {
     // useful for playlists
     if (this->m_context.settings.screenshot.take) {
 	this->m_nextFrameScreenshot = this->m_context.settings.screenshot.delay;
-
-	if (this->m_videoDriver != nullptr) {
-	    this->m_nextFrameScreenshot += this->m_videoDriver->getFrameCounter ();
-	}
-
+	this->m_renderedFrames = 0;
 	this->m_screenShotTaken = false;
     }
 
@@ -541,10 +537,6 @@ void WallpaperApplication::takeScreenshot (const std::filesystem::path& filename
 	const int vpWidth = viewport->viewport.z - viewport->viewport.x;
 	const int vpHeight = viewport->viewport.w - viewport->viewport.y;
 
-	// bind the wallpaper's FBO to read from it directly
-	// this is more reliable than the default framebuffer on some drivers (NVIDIA/Wayland)
-	glBindFramebuffer (GL_FRAMEBUFFER, wallpaper->getWallpaperFramebuffer ());
-
 	// ensure rendering is complete before reading
 	glFinish ();
 
@@ -554,16 +546,23 @@ void WallpaperApplication::takeScreenshot (const std::filesystem::path& filename
 	const auto bufferSize = readWidth * readHeight * 3;
 	auto* buffer = new uint8_t[bufferSize];
 
-	// read the FBO data into the pixel buffer
+	// Read the wallpaper texture itself instead of the framebuffer it is
+	// attached to. Web and video wallpapers fill that texture without routing
+	// their content through the scene FBO, so reading the FBO returned black.
+	auto* rgbaBuffer = new uint8_t[static_cast<size_t> (readWidth) * readHeight * 4];
+
 	glPixelStorei (GL_PACK_ALIGNMENT, 1);
-	if (GLEW_VERSION_4_5) {
-	    glReadnPixels (0, 0, readWidth, readHeight, GL_RGB, GL_UNSIGNED_BYTE, bufferSize, buffer);
-	} else {
-	    glReadPixels (0, 0, readWidth, readHeight, GL_RGB, GL_UNSIGNED_BYTE, buffer);
+	glBindTexture (GL_TEXTURE_2D, wallpaper->getWallpaperTexture ());
+	glGetTexImage (GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgbaBuffer);
+	glBindTexture (GL_TEXTURE_2D, 0);
+
+	for (int i = 0; i < readWidth * readHeight; ++i) {
+	    buffer[i * 3] = rgbaBuffer[i * 4];
+	    buffer[i * 3 + 1] = rgbaBuffer[i * 4 + 1];
+	    buffer[i * 3 + 2] = rgbaBuffer[i * 4 + 2];
 	}
 
-	// restore default framebuffer
-	glBindFramebuffer (GL_FRAMEBUFFER, 0);
+	delete[] rgbaBuffer;
 
 	if (const GLenum error = glGetError (); error != GL_NO_ERROR) {
 	    sLog.error ("Cannot obtain pixel data for screen ", screen, ". OpenGL error: ", error);
@@ -838,7 +837,11 @@ void WallpaperApplication::render () {
 	    return;
 	}
 
-	if (this->m_videoDriver->getFrameCounter () < this->m_nextFrameScreenshot) {
+	// Some drivers reset the frame counter per output, so screenshots are
+	// timed against the frames this application has actually presented.
+	++this->m_renderedFrames;
+
+	if (this->m_renderedFrames < this->m_nextFrameScreenshot) {
 	    return;
 	}
 
@@ -865,7 +868,9 @@ void WallpaperApplication::show () {
 }
 
 void WallpaperApplication::update (Render::Drivers::Output::OutputViewport* viewport) {
-    // render the scene
+    // draw the scene. The per-frame tick (clock values, playlists, fullscreen
+    // pause and screenshots) lives in render(), which is the loop's entry
+    // point; calling it here would recurse through the driver's event pump.
     m_renderContext->render (viewport);
 }
 

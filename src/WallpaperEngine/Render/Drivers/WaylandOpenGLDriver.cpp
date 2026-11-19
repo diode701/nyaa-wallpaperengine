@@ -1,6 +1,7 @@
 #include "WaylandOpenGLDriver.h"
 #include "VideoFactories.h"
 #include "WallpaperEngine/Application/WallpaperApplication.h"
+#include "Output/WaylandOutputViewport.h"
 #include "WallpaperEngine/Logging/Log.h"
 
 #define class _class
@@ -15,8 +16,12 @@ extern "C" {
 #undef namespace
 #undef static
 
+#include <cerrno>
+#include <poll.h>
 #include <string.h>
 #include <unistd.h>
+
+#include <algorithm>
 
 using namespace WallpaperEngine::Render::Drivers;
 
@@ -37,7 +42,13 @@ static void handlePointerEnter (
 }
 
 static void
-handlePointerLeave (void* data, struct wl_pointer* wl_pointer, uint32_t serial, struct wl_surface* surface) { }
+handlePointerLeave (void* data, struct wl_pointer* wl_pointer, uint32_t serial, struct wl_surface* surface) {
+    const auto driver = static_cast<WaylandOpenGLDriver*> (data);
+
+    // otherwise the last position keeps being reported as if the pointer was
+    // still over the wallpaper
+    driver->viewportInFocus = nullptr;
+}
 
 static void handlePointerAxis (void* data, wl_pointer* wl_pointer, uint32_t time, uint32_t axis, wl_fixed_t value) { }
 
@@ -334,36 +345,105 @@ WaylandOpenGLDriver::~WaylandOpenGLDriver () {
 }
 
 void WaylandOpenGLDriver::dispatchEventQueue () {
-    static bool initialized = false;
+    // Frame callbacks are only delivered while the compositor considers the
+    // surface visible. Driving the whole loop off them meant the engine froze
+    // as soon as the surface was occluded, moved to another output or simply
+    // not repainted (it then only woke up for pointer events). Pump the queue
+    // without blocking and render on our own clock instead.
+    const float minimumTime = 1.0f / static_cast<float> (std::max (1, this->m_context.settings.render.maximumFPS));
 
-    if (!initialized) {
-	initialized = true;
+    wl_display* display = this->m_waylandContext.display;
 
-	for (const auto& viewport : this->getOutput ().getViewports () | std::views::values) {
-	    this->getApp ().update (viewport);
+    while (wl_display_prepare_read (display) != 0) {
+	if (wl_display_dispatch_pending (display) < 0) {
+	    m_requestedExit = true;
+	    return;
 	}
     }
 
-    // TODO: FRAMETIME CONTROL SHOULD GO BACK TO THE CWALLPAPAERAPPLICATION ONCE ACTUAL PARTICLES ARE IMPLEMENTED
-    // TODO: AS THOSE, MORE THAN LIKELY, WILL REQUIRE OF A DIFFERENT PROCESSING RATE
+    if (wl_display_flush (display) < 0) {
+	wl_display_cancel_read (display);
 
-    // TODO: WRITE A NON-BLOCKING VERSION OF THIS ONCE PARTICLE SIMULATION STARTS WORKING
-    // TODO: OTHERWISE wl_display_dispatch WILL BLOCK IF NO SURFACES ARE BEING DRAWN
-    static float startTime, endTime, minimumTime = 1.0f / this->m_context.settings.render.maximumFPS;
-    // get the start time of the frame
-    startTime = this->getRenderTime ();
-
-    if (wl_display_dispatch (m_waylandContext.display) == -1) {
-	m_requestedExit = true;
+	if (errno != EAGAIN) {
+	    m_requestedExit = true;
+	    return;
+	}
     }
 
-    m_frameCounter++;
+    const float now = this->getRenderTime ();
+    int timeout = 0;
 
-    endTime = this->getRenderTime ();
+    if (this->m_lastFrameTime >= 0.0f) {
+	timeout = static_cast<int> (std::max (0.0f, (minimumTime - (now - this->m_lastFrameTime)) * 1000.0f));
+    }
 
-    // ensure the frame time is correct to not overrun FPS
-    if ((endTime - startTime) < minimumTime) {
-	usleep ((minimumTime - (endTime - startTime)) * CLOCKS_PER_SEC);
+    pollfd descriptor = { .fd = wl_display_get_fd (display), .events = POLLIN, .revents = 0 };
+    const int pollResult = poll (&descriptor, 1, timeout);
+
+    if (pollResult > 0 && (descriptor.revents & POLLIN) != 0) {
+	if (wl_display_read_events (display) < 0) {
+	    m_requestedExit = true;
+	    return;
+	}
+
+	if (wl_display_dispatch_pending (display) < 0) {
+	    m_requestedExit = true;
+	    return;
+	}
+    } else {
+	wl_display_cancel_read (display);
+
+	if (pollResult < 0 && errno != EINTR) {
+	    m_requestedExit = true;
+	    return;
+	}
+    }
+
+    // render every configured viewport whose surface is ready, regardless of
+    // whether a frame callback arrived this tick
+    const float frameStart = this->getRenderTime ();
+
+    if (this->m_lastFrameTime < 0.0f || (frameStart - this->m_lastFrameTime) >= minimumTime) {
+	this->m_lastFrameTime = frameStart;
+
+	for (const auto& viewport : this->getOutput ().getViewports () | std::views::values) {
+	    // the mouse driver only reports live input while a frame is being
+	    // rendered, so mark the viewport as rendering for the whole update
+	    auto* waylandViewport = dynamic_cast<Output::WaylandOutputViewport*> (viewport);
+
+	    if (waylandViewport != nullptr) {
+		waylandViewport->rendering = true;
+	    }
+
+	    this->getApp ().update (viewport);
+
+	    if (waylandViewport != nullptr) {
+		waylandViewport->rendering = false;
+	    }
+	}
+
+	++this->m_frameCounter;
+
+	if (std::getenv ("LWE_FRAME_DEBUG") != nullptr) {
+	    static auto lastReport = std::chrono::steady_clock::now ();
+	    static uint32_t framesSinceReport = 0;
+
+	    ++framesSinceReport;
+
+	    const auto now = std::chrono::steady_clock::now ();
+
+	    if (now - lastReport >= std::chrono::seconds (1)) {
+		sLog.out ("Presented frames per second: ", framesSinceReport);
+		framesSinceReport = 0;
+		lastReport = now;
+	    }
+	}
+    }
+
+    const float elapsed = this->getRenderTime () - frameStart;
+
+    if (elapsed < minimumTime) {
+	usleep (static_cast<useconds_t> ((minimumTime - elapsed) * 1000000.0f));
     }
 }
 

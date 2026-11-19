@@ -15,6 +15,7 @@
 #include <glm/gtc/type_ptr.hpp>
 #include <iomanip>
 #include <iterator>
+#include <map>
 #include <sstream>
 
 #include <ft2build.h>
@@ -119,6 +120,44 @@ void collectFontCandidates (
     } catch (const std::filesystem::filesystem_error& e) {
 	sLog.error ("Font discovery skipped ", root.string (), ": ", e.what ());
     }
+}
+
+/**
+ * Wallpaper Engine names Windows system fonts ("systemfont_consolas") instead
+ * of shipping them. Those do not exist on Linux, and without a mapping the
+ * directory scan picks whatever it finds first (usually an italic Adwaita
+ * face). The engine's own asset folder ships a handful of real fonts, so map
+ * the known names onto those and only fall back to fontconfig-less discovery
+ * when the mapping cannot be loaded.
+ */
+std::string mapSystemFontToAsset (const std::string& requestedFont) {
+    if (requestedFont.rfind ("systemfont_", 0) != 0) {
+	return {};
+    }
+
+    static const std::map<std::string, std::string> mapping = {
+	{ "systemfont_consolas", "fonts/RobotoMono-Regular.ttf" },
+	{ "systemfont_couriernew", "fonts/RobotoMono-Regular.ttf" },
+	{ "systemfont_lucidaconsole", "fonts/RobotoMono-Regular.ttf" },
+	{ "systemfont_segoeui", "fonts/NotoSans-Regular.ttf" },
+	{ "systemfont_segoeuisymbol", "fonts/NotoSans-Regular.ttf" },
+	{ "systemfont_arial", "fonts/NotoSans-Regular.ttf" },
+	{ "systemfont_tahoma", "fonts/NotoSans-Regular.ttf" },
+	{ "systemfont_verdana", "fonts/NotoSans-Regular.ttf" },
+	{ "systemfont_calibri", "fonts/NotoSans-Regular.ttf" },
+	{ "systemfont_trebuchetms", "fonts/NotoSans-Regular.ttf" },
+	{ "systemfont_timesnewroman", "fonts/NotoSans-Regular.ttf" },
+    };
+
+    const auto exact = mapping.find (lowercase (requestedFont));
+
+    if (exact != mapping.end ()) {
+	return exact->second;
+    }
+
+    // any other "systemfont_*" name is still better served by a real bundled
+    // font than by an arbitrary face found on the host
+    return "fonts/NotoSans-Regular.ttf";
 }
 
 std::vector<std::filesystem::path> findFallbackFonts (const std::string& requestedFont, bool preferSymbols) {
@@ -397,6 +436,20 @@ std::vector<unsigned char> CText::loadFontData () {
 	auto direct = readFilesystemFont (requested);
 	if (!direct.empty ()) {
 	    return cacheFontData (std::move (direct));
+	}
+    }
+
+    // Wallpaper Engine references Windows system fonts by name; resolve those
+    // against the fonts that ship with the engine's assets before scanning the
+    // host for something that merely resembles them
+    const std::string mappedFont = mapSystemFontToAsset (this->m_text.font);
+
+    if (!mappedFont.empty ()) {
+	try {
+	    auto stream = this->getAssetLocator ().read (mappedFont);
+	    return cacheFontData ({ std::istreambuf_iterator<char> (*stream), std::istreambuf_iterator<char> () });
+	} catch (const std::exception& e) {
+	    sLog.debug ("Mapped font ", mappedFont, " not available: ", e.what ());
 	}
     }
 
@@ -773,3 +826,31 @@ void CText::render () {
 }
 
 const Text& CText::getText () const { return this->m_text; }
+
+bool CText::hitTest (const glm::vec2& worldPosition) const {
+    if (this->m_vertices.empty ()) {
+	return false;
+    }
+
+    const float sceneWidth = static_cast<float> (this->getScene ().getWidth ());
+    const float sceneHeight = static_cast<float> (this->getScene ().getHeight ());
+
+    // the quad is uploaded in scene-centred space, which is also where the
+    // cursor globals land once they are converted from normalised coordinates
+    const float x = worldPosition.x - sceneWidth / 2.0f;
+    const float y = sceneHeight / 2.0f - worldPosition.y;
+
+    float minX = this->m_vertices.front ().x;
+    float maxX = minX;
+    float minY = this->m_vertices.front ().y;
+    float maxY = minY;
+
+    for (const auto& vertex : this->m_vertices) {
+	minX = std::min (minX, vertex.x);
+	maxX = std::max (maxX, vertex.x);
+	minY = std::min (minY, vertex.y);
+	maxY = std::max (maxY, vertex.y);
+    }
+
+    return x >= minX && x <= maxX && y >= minY && y <= maxY;
+}

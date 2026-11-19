@@ -179,6 +179,11 @@ AudioStream::~AudioStream () {
     delete this->m_queue;
 
     if (this->m_formatContext != nullptr) {
+	if (this->m_formatContext->pb != nullptr) {
+	    av_freep (&this->m_formatContext->pb->buffer);
+	    avio_context_free (&this->m_formatContext->pb);
+	}
+
 	avformat_free_context (this->m_formatContext);
     }
 
@@ -412,6 +417,12 @@ bool AudioStream::isInitialized () const { return this->m_initialized; }
 
 void AudioStream::setRepeat (const bool newRepeat) { this->m_repeat = newRepeat; }
 
+void AudioStream::setVolume (const float newVolume) {
+    this->m_volume = newVolume < 0.0f ? 0.0f : (newVolume > 1.0f ? 1.0f : newVolume);
+}
+
+float AudioStream::getVolume () const { return this->m_volume; }
+
 bool AudioStream::isRepeat () const { return this->m_repeat; }
 
 ReadStreamSharedPtr& AudioStream::getBuffer () { return this->m_buffer; }
@@ -489,7 +500,10 @@ int AudioStream::resampleAudio (uint8_t* out_buf, const int out_size) {
 
     out_nb_channels = av_get_channel_layout_nb_channels (out_channel_layout);
 #else
-    out_nb_channels = this->getContext ()->ch_layout.nb_channels;
+    // the destination is the audio device, not the file: using the input
+    // channel count here made mono files allocate a mono buffer that
+    // swr_convert then filled with stereo samples
+    out_nb_channels = this->m_audioContext.getChannels ();
 #endif
     ret = av_samples_alloc_array_and_samples (
 	&resampled_data, &out_linesize, out_nb_channels, out_nb_samples, this->m_audioContext.getFormat (), 0
@@ -563,11 +577,16 @@ int AudioStream::resampleAudio (uint8_t* out_buf, const int out_size) {
 
     av_freep (&resampled_data);
 
-    return resampled_data_size;
+    // the caller's buffer is fixed size; never claim more than was copied or it
+    // will mix/read past the end of audio_buf
+    return std::min (resampled_data_size, out_size);
 }
 
 int AudioStream::decodeFrame (uint8_t* audioBuffer, const int bufferSize) {
-    static int audio_pkt_size = 0;
+    // this used to be a function-local static shared by every stream in the
+    // scene; with ~20 sounds loaded the accounting of one file bled into the
+    // next
+    int& audio_pkt_size = this->m_audioPacketSize;
 
     // block until there's any data in the buffers
     while (this->m_audioContext.getApplicationContext ().state.general.keepRunning) {

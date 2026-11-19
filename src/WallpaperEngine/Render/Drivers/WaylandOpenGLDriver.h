@@ -95,6 +95,8 @@ private:
     void finishEGL () const;
 
     uint32_t m_frameCounter = 0;
+    /** time of the last presented frame, -1 until the first one */
+    float m_lastFrameTime = -1.0f;
     ApplicationContext& m_context;
     WaylandMouseInput m_mouseInput;
 
