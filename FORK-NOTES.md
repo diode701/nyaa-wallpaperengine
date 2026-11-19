@@ -82,6 +82,10 @@ State on 2026-11-19, branch `nyaa-fixes`. Long-form evidence:
     forbids. The CEF profile moved from a never-deleted `/tmp/<uuid>` to
     `$XDG_CACHE_HOME/linux-wallpaperengine/cef-<uuid>`, removed on shutdown
     (one per instance, since CEF locks it and nyaa-paper runs one per monitor).
+    The executable links with `--no-as-needed`: with `--as-needed` (Flatpak SDK
+    default) libcef dropped out of its NEEDED list, libc loaded first, and
+    Chromium's `dlsym(RTLD_NEXT, "close")` came back empty: every web wallpaper
+    aborted in `CefInitialize` with "close symbol missing".
 
 ## Building
 

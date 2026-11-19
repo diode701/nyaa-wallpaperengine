@@ -626,6 +626,13 @@ add_executable(linux-wallpaperengine
 
 target_link_libraries (linux-wallpaperengine PUBLIC linux-wallpaperengine-lib)
 
+# keep libcef.so in the executable's own NEEDED list, ahead of libc: Chromium
+# wraps close() and finds the real one with dlsym(RTLD_NEXT), which only
+# searches objects loaded after libcef. Toolchains that link with --as-needed
+# by default (the Flatpak SDK, several distributions) drop libcef from the
+# executable, libc loads first, and CefInitialize aborts ("close symbol missing")
+target_link_options(linux-wallpaperengine PRIVATE "LINKER:--no-as-needed")
+
 # everything the engine loads (libcef.so, the engine library) sits next to the
 # binary: look there, not in the build tree, so an installed copy (Flatpak,
 # /opt, a tarball) runs without an LD_LIBRARY_PATH wrapper
