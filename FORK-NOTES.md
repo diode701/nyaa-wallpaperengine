@@ -138,13 +138,17 @@ Debug switches (environment, no effect on normal runs):
   never matched, and with one engine per monitor the instances muted each
   other. Now streams from `linux-wallpaperengine` and corked streams are
   ignored. Crackle below may be the same mute flapping: retest.
-- **Intermittent audio crackle/beeps** (e.g. `1823900922` Nissan GT-R, scene
-  with ambient audio): some runs clean, some crackle; seen on the host build
-  too, so not packaging. Suspects: auto-mute flapping (the PulseAudio playing
-  detector may count our own/Chromium's stream as "other audio" and toggle
-  mute rapidly; the user recalls "don't auto-mute" fixing it), or underruns in
-  the SDL stream path. Next: run with `LWE_AUDIO_DEBUG`, log mute toggles in
-  `PulseAudioPlayingDetector`, compare on a second machine.
+- **Audio crackle/beeps on every wallpaper with sound** (host build too,
+  intermittent, worse under CPU load; *not* fixed by --noautomute, so not
+  auto-mute). Ruled out: sample format (stream is f32/2ch/48k as requested),
+  buffer size (4096), PulseAudio mute, packaging. Likely causes in
+  `SDLAudioDriver.cpp` `audio_callback`: (1) `decodeFrame()` runs inside the
+  real-time callback with the stream mutex held, so a slow/blocked decode
+  starves the device (crackle); (2) a 0-byte decode makes `len1 == 0` and the
+  fill loop spins inside the callback; (3) beeps = a short buffer repeating:
+  the error path re-mixes a fixed 1024-byte block, or a bytes/samples mismatch
+  in the decoder. **Fix (next):** decode on the stream thread into a ring
+  buffer; the callback only copies ready samples, never decodes or waits.
 - **Presets** (`project.json` with only `dependency` + `preset`, no `type`):
   "Project type missing". Resolve in nyaa-paper (pass the dependency and the
   preset values), see its START-HERE 4c.
