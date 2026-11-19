@@ -133,6 +133,11 @@ Debug switches (environment, no effect on normal runs):
 
 ## Known gaps
 
+- ~~**All audio silent with auto-mute on**~~ fixed: the playing detector
+  skipped only streams with its own PID; in a Flatpak (PID namespace) that
+  never matched, and with one engine per monitor the instances muted each
+  other. Now streams from `linux-wallpaperengine` and corked streams are
+  ignored. Crackle below may be the same mute flapping: retest.
 - **Intermittent audio crackle/beeps** (e.g. `1823900922` Nissan GT-R, scene
   with ambient audio): some runs clean, some crackle; seen on the host build
   too, so not packaging. Suspects: auto-mute flapping (the PulseAudio playing

@@ -1,6 +1,7 @@
 #include "PulseAudioPlayingDetector.h"
 #include "WallpaperEngine/Logging/Log.h"
 
+#include <cstring>
 #include <unistd.h>
 
 namespace WallpaperEngine::Audio::Drivers::Detectors {
@@ -15,7 +16,22 @@ void sinkInputInfoCallback (pa_context* context, const pa_sink_input_info* info,
 	return;
     }
 
-    // get processid
+    // a paused stream plays nothing
+    if (info->corked) {
+	return;
+    }
+
+    // Our own streams, and those of the other engine instances (nyaa-paper
+    // runs one per monitor), are not "other audio". Matching on the PID is not
+    // enough: inside a Flatpak getpid() is the sandbox PID while PulseAudio
+    // reports the host one, so every engine muted itself; and with several
+    // monitors the instances muted each other. CEF's and mpv's streams also
+    // come from this binary.
+    const char* binary = pa_proplist_gets (info->proplist, PA_PROP_APPLICATION_PROCESS_BINARY);
+    if (binary != nullptr && strcmp (binary, "linux-wallpaperengine") == 0) {
+	return;
+    }
+
     const char* value = pa_proplist_gets (info->proplist, PA_PROP_APPLICATION_PROCESS_ID);
 
     if (value && strtol (value, nullptr, 10) != getpid () && pa_cvolume_avg (&info->volume) != PA_VOLUME_MUTED) {
