@@ -305,8 +305,8 @@ linux-wallpaperengine --set-property bloom=1 2370927443
 
 ## 🌈 Example Backgrounds
 
-![example1](docs/images/example.gif)
-![example2](docs/images/example2.gif)
+![example1](images/example.gif)
+![example2](images/example2.gif)
 
 Want to see more examples of backgrounds that work? Head over to the [project's website](https://wpengine.alma.mu/#showcase)
 
