@@ -7,36 +7,7 @@ Base: `Gaiser147/linux-wallpaperengine`, branch `codex/wallpaper-compat-all`,
 commit `7299e43` (the FreeType text rendering work of PR #561), plus the fixes
 below.
 
-Everything in here was verified by running wallpapers, not by reading the code;
-the measurement notes live in `~/lwe-audit/REPORT.md` on the development machine.
-
-## Start here (next session)
-
-State on 2026-11-19, branch `nyaa-fixes`. Long-form evidence:
-`~/lwe-audit/REPORT.md` (canonical) on the development machine.
-
-**Rules**
-- Wallpaper Engine's `assets/` are paid Steam content: the engine reads them
-  from the host at runtime; **never copy, bundle or commit them** (that includes
-  shader dumps made with `LWE_SHADER_DUMP`).
-- Make the engine itself Flatpak-friendly instead of relying on wrapper scripts.
-
-**Next, in order**
-1. ~~*Web audio is intermittent* (`901759762`)~~ **not an engine bug.** The page
-   never plays on load: `Scripts/script.js` calls `.play()` only from click
-   handlers (`#PlayBGMButton`, `.Option.Line`, `#PlayRandomLineButton`). Sound
-   appears only after a click reaches the page. On a real desktop the clicks go
-   to plasmashell, not the wallpaper surface, so interactive web wallpapers stay
-   silent until desktop clicks are forwarded (a KDE-side feature, out of scope).
-2. ~~*Flatpak-compatible engine*~~ **done** (fix 10 below). Left for the
-   packaging step: strip `libcef.so` (1.4 GB unstripped), install only the
-   runtime files (not the test binaries / `chrome-sandbox` that land in
-   `build/output`).
-3. Flatpak module (sources pinned: glew, freeglut, mpv, CEF archive, this tree
-   with submodules), wired into nyaa-paper's manifest, which already grants
-   read-only access to the Steam assets folder.
-4. Re-run the render audit on a clean build; then black screenshots for
-   web/video, script API gaps, light objects.
+Everything in here was verified by running wallpapers, not by reading the code.
 
 ## What is fixed relative to the base commit
 
