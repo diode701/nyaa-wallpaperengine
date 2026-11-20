@@ -162,15 +162,10 @@ Debug switches (environment, no effect on normal runs):
   (host: 2.3.1) and `glewInit` reports "Unknown error" there instead of the
   expected `GLEW_ERROR_NO_GLX_DISPLAY`; try glew 2.3.1 in the manifest.
 - Interactive web wallpapers: clicks DO reach the page on the desktop
-  (user-verified). **Web audio is silent in the Flatpak only.** Test page
-  (`~/Pictures/.nyaa-webaudio-test`, a WebAudio tone on load): the host build
-  gets a "Chromium" sink-input and starts `audio.mojom.AudioService`, and the
-  page logs `CONSOLE ... audio state running` with `--enable-logging=stderr
-  --log-level=0`. In the Flatpak: no AudioService process, no stream, and no
-  renderer console output at all (GPU process does start). Next: find out
-  whether the renderer runs/logs in the sandbox (CefDisplayHandler
-  OnConsoleMessage would show page logs regardless of Chromium logging),
-  then why the audio service is never requested.
+  (user-verified). Web audio works in the Flatpak (test page: Chromium
+  sink-input, AudioContext "running"). An earlier "silent in the Flatpak"
+  reading was the screen-off freeze (fix 11), not audio. Pages that start
+  sound on click (Yui/Yukino) need a retest by the user with the screen on.
 
 - screenshots of **web** and **video** wallpapers come out black even though they
   render on screen (affects only *screenshot on apply* / pywal theming in nyaa-paper; its grid thumbnails come from each wallpaper's preview file);
