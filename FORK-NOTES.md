@@ -91,6 +91,14 @@ State on 2026-11-19, branch `nyaa-fixes`. Long-form evidence:
     exits without `$DISPLAY`; headless has no GL, so its GPU process fails and
     restarts in a loop: ~80 errors/s and a busy CPU).
 
+11. **No freeze while the screen is off.** Swap interval 0 (EGL and GLFW):
+    with the default of 1, NVIDIA's EGL blocked in `eglSwapBuffers` until the
+    compositor requested a frame; with the session locked / DPMS off it never
+    did and the engine hung so hard SIGINT went unhandled. Frames are paced by
+    the engine's own clock (fix 1).
+12. **Web diagnostics.** Load errors and renderer crashes are logged;
+    `LWE_WEB_DEBUG` prints the page's console.
+
 ## Building
 
 ```sh

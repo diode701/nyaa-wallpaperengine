@@ -56,6 +56,9 @@ GLFWOpenGLDriver::GLFWOpenGLDriver (const char* windowTitle, ApplicationContext&
 
     // make context current, required for glew initialization
     glfwMakeContextCurrent (this->m_window);
+    // frames are paced by the engine; a blocking swap would freeze it while
+    // the window is hidden or the display is off (see WaylandOutputViewport)
+    glfwSwapInterval (0);
 
     // initialize glew for rendering
     if (const GLenum result = glewInit (); result != GLEW_OK) {

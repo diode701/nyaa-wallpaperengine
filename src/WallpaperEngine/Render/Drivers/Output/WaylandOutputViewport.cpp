@@ -175,6 +175,13 @@ void WaylandOutputViewport::setupLS () {
 	sLog.exception ("Failed to make egl current");
     }
 
+    // The engine paces frames itself (frame budget + Wayland frame callbacks
+    // as hints). With the default swap interval of 1, NVIDIA's EGL blocks in
+    // eglSwapBuffers until the compositor asks for a frame; with the screen
+    // locked or the display off it never does, and the engine froze so hard
+    // it could not even handle SIGINT.
+    eglSwapInterval (m_driver->getEGLContext ()->display, 0);
+
     this->m_driver->getOutput ().reset ();
 }
 
