@@ -128,6 +128,7 @@ Debug switches (environment, no effect on normal runs):
 | `LWE_SHADER_DUMP=<dir>` | dump every compiled vertex/fragment pair |
 | `LWE_FAKE_CURSOR=x,y` / `LWE_FAKE_CURSOR_ANIMATE` / `LWE_FAKE_CLICK` | drive the pointer without a display |
 | `LWE_AUDIO_DEBUG` | sum of the 16-band spectrum the scripts see |
+| `LWE_WEB_DEBUG` | print web wallpapers' console output (load errors and renderer crashes are always logged) |
 | `LWE_NO_CEF_SANDBOX` | disable Chromium's sandbox outside a Flatpak too |
 | `LWE_NO_AUDIO_DEVICE` | keep the audio driver without opening a device (sanitizer runs) |
 
