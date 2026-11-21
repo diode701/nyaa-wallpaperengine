@@ -247,7 +247,20 @@ ApplicationContext::ApplicationContext (int argc, char* argv[]) : m_argc (argc),
 void ApplicationContext::loadSettingsFromArgv () {
     std::string lastScreen;
 
-    argparse::ArgumentParser program ("linux-wallpaperengine", "0.0", argparse::default_arguments::help);
+    // the nyaa-paper fork keeps upstream's name (binary, Wayland namespace,
+    // install paths) so fixes can go back upstream; it says so in its version
+    static constexpr const char* forkVersion = "0.0 (nyaa-wallpaperengine fork, branch nyaa-fixes)";
+
+    argparse::ArgumentParser program ("linux-wallpaperengine", forkVersion, argparse::default_arguments::help);
+
+    // -v is --volume, so argparse's own version flag (-v/--version) cannot be used
+    program.add_argument ("--version")
+	.help ("Print the version and exit")
+	.nargs (0)
+	.action ([] (const std::string&) {
+	    std::cout << "linux-wallpaperengine " << forkVersion << std::endl;
+	    std::exit (0);
+	});
 
     auto& backgroundGroup = program.add_group ("Background options");
     auto& backgroundMode = backgroundGroup.add_mutually_exclusive_group (false);
@@ -578,6 +591,7 @@ void ApplicationContext::loadSettingsFromArgv () {
 	std::stringbuf buffer;
 	std::ostream bufferStream (&buffer);
 
+	bufferStream << "linux-wallpaperengine " << forkVersion << std::endl;
 	bufferStream << "Running with: ";
 
 	for (int i = 0; i < this->m_argc; i++) {
