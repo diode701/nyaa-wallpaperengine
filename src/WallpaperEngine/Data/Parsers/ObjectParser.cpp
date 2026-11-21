@@ -97,7 +97,7 @@ ObjectUniquePtr ObjectParser::parse (const JSON& it, const Project& project) {
     } else if (textIt != it.end ()) {
 	return parseText (it, project, std::move (basedata));
     } else if (lightIt != it.end ()) {
-	sLog.error ("Light objects are not supported yet");
+	return parseLight (it, project, std::move (basedata));
     } else {
 	if (!it.optional ("solid", false)) {
 	    // Objects without a type are containers: they only carry a transform
@@ -108,6 +108,21 @@ ObjectUniquePtr ObjectParser::parse (const JSON& it, const Project& project) {
     }
 
     return std::make_unique<Object> (std::move (basedata));
+}
+
+LightUniquePtr ObjectParser::parseLight (const JSON& it, const Project& project, ObjectData base) {
+    LightData lightData;
+
+    lightData.type = it.optional ("light", std::string ("point"));
+    lightData.color = it.user ("color", project.properties, glm::vec3 (1.0f));
+    lightData.intensity = it.user ("intensity", project.properties, 1.0f);
+    lightData.radius = it.user ("radius", project.properties, 0.0f);
+    lightData.exponent = it.optional ("exponent", 1.0f);
+    lightData.innerCone = it.optional ("innercone", 0.0f);
+    lightData.outerCone = it.optional ("outercone", 360.0f);
+    lightData.castShadow = it.optional ("castshadow", false);
+
+    return std::make_unique<Light> (std::move (base), std::move (lightData));
 }
 
 std::vector<int> ObjectParser::parseDependencies (const JSON& it) {

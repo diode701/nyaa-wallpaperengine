@@ -804,6 +804,9 @@ void CImage::setupPasses () {
 	if (!writesToTarget && this->shouldRenderFinalPass (std::next (cur) == end)) {
 	    // TODO: PROPERLY CHECK EFFECT'S VISIBILITY AND TAKE IT INTO ACCOUNT
 	    spacePosition = this->getSceneSpacePosition ();
+	    // the vertices are in scene space already; the per-image ortho would
+	    // squash them and put every light at the wrong distance
+	    pass->setModelMatrix (&this->m_sceneModelMatrix);
 	    drawTo = this->getScene ().getFBO ();
 	    projection = &this->m_modelViewProjectionScreen;
 	    inverseProjection = &this->m_modelViewProjectionScreenInverse;

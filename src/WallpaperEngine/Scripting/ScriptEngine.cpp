@@ -479,6 +479,15 @@ static UserSetting* textSettingForProperty (const Text& text, const std::string&
     return nullptr;
 }
 
+static UserSetting* lightSettingForProperty (const Light& light, const std::string& property) {
+    // a light's "visible" lives in the base object data (groupVisible)
+    if (property == "visible") return light.groupVisible.get ();
+    if (property == "color") return light.color.get ();
+    if (property == "intensity") return light.intensity.get ();
+    if (property == "radius") return light.radius.get ();
+    return nullptr;
+}
+
 static UserSetting* settingForProperty (const Object& object, const std::string& property) {
     if (property == "origin") {
 	return object.origin.get ();
@@ -494,6 +503,10 @@ static UserSetting* settingForProperty (const Object& object, const std::string&
 
     if (object.is<Text> ()) {
 	return textSettingForProperty (*object.as<Text> (), property);
+    }
+
+    if (object.is<Light> ()) {
+	return lightSettingForProperty (*object.as<Light> (), property);
     }
 
     if (property == "scale") return object.groupScale.get ();

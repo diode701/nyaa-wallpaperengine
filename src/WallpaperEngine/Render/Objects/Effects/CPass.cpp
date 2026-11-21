@@ -1,3 +1,4 @@
+#include <cstdlib>
 #include "CPass.h"
 
 #include <filesystem>
@@ -323,10 +324,14 @@ void CPass::setupRenderUniforms () {
 		break;
 	    // TODO: THESE MIGHT NEED SPECIAL TREATMENT? IDK ONLY SUPPORT 1 FOR NOW
 	    case Vector4:
-		glUniform4fv (value->id, 1, glm::value_ptr (*static_cast<const glm::vec4*> (value->value)));
+		glUniform4fv (
+		    value->id, value->count, glm::value_ptr (*static_cast<const glm::vec4*> (value->value))
+		);
 		break;
 	    case Vector3:
-		glUniform3fv (value->id, 1, glm::value_ptr (*static_cast<const glm::vec3*> (value->value)));
+		glUniform3fv (
+		    value->id, value->count, glm::value_ptr (*static_cast<const glm::vec3*> (value->value))
+		);
 		break;
 	    case Vector2:
 		glUniform2fv (value->id, 1, glm::value_ptr (*static_cast<const glm::vec2*> (value->value)));
@@ -770,6 +775,38 @@ void CPass::setupUniforms () {
     // lighting variables
     this->addUniform ("g_LightAmbientColor", sceneData.colors.ambient);
     this->addUniform ("g_LightSkylightColor", sceneData.colors.skylight);
+    // scene lights, packed per kind by CScene::updateLights every frame; the
+    // generated LightingV1 module declares these arrays with the scene's counts
+    if (scene.getPointLightCount () > 0) {
+	this->addUniform ("g_LPoint_Color", scene.getPointLightColors (), scene.getPointLightCount ());
+	this->addUniform ("g_LPoint_Origin", scene.getPointLightOrigins (), scene.getPointLightCount ());
+    }
+
+    if (scene.getSpotLightCount () > 0) {
+	this->addUniform ("g_LSpot_Color", scene.getSpotLightColors (), scene.getSpotLightCount ());
+	this->addUniform ("g_LSpot_Origin", scene.getSpotLightOrigins (), scene.getSpotLightCount ());
+	this->addUniform ("g_LSpot_Direction", scene.getSpotLightDirections (), scene.getSpotLightCount ());
+	this->addUniform ("g_LSpot_Exponent", scene.getSpotLightExponents (), scene.getSpotLightCount ());
+    }
+
+    if (scene.getDirectionalLightCount () > 0) {
+	this->addUniform ("g_LDirectional_Color", scene.getDirectionalLightColors (), scene.getDirectionalLightCount ());
+	this->addUniform (
+	    "g_LDirectional_Direction", scene.getDirectionalLightDirections (), scene.getDirectionalLightCount ()
+	);
+    }
+
+    this->addUniform ("g_EyePosition", scene.getEyePosition ());
+
+    if (std::getenv ("LWE_LIGHT_DEBUG") != nullptr) {
+	sLog.out (
+	    "Light uniforms in pass ", this->m_pass.shader, ": g_LPoint_Color=",
+	    glGetUniformLocation (this->m_programID, "g_LPoint_Color"), " g_LSpot_Color=",
+	    glGetUniformLocation (this->m_programID, "g_LSpot_Color"), " g_LDirectional_Color=",
+	    glGetUniformLocation (this->m_programID, "g_LDirectional_Color")
+	);
+    }
+
     // register variables like brightness and alpha with some default value
     this->addUniform ("g_Brightness", renderable.getBrightness ());
     this->addUniform ("g_UserAlpha", renderable.getUserAlpha ());
@@ -983,8 +1020,8 @@ void CPass::addUniform (const std::string& name, glm::vec3 value) {
     this->addUniform (name, UniformType::Vector3, value);
 }
 
-void CPass::addUniform (const std::string& name, const glm::vec3* value) {
-    this->addUniform (name, UniformType::Vector3, value, 1);
+void CPass::addUniform (const std::string& name, const glm::vec3* value, int count) {
+    this->addUniform (name, UniformType::Vector3, value, count);
 }
 
 void CPass::addUniform (const std::string& name, const glm::vec3** value) {
@@ -995,8 +1032,8 @@ void CPass::addUniform (const std::string& name, const glm::vec4 value) {
     this->addUniform (name, UniformType::Vector4, value);
 }
 
-void CPass::addUniform (const std::string& name, const glm::vec4* value) {
-    this->addUniform (name, UniformType::Vector4, value, 1);
+void CPass::addUniform (const std::string& name, const glm::vec4* value, int count) {
+    this->addUniform (name, UniformType::Vector4, value, count);
 }
 
 void CPass::addUniform (const std::string& name, const glm::vec4** value) {

@@ -10,6 +10,10 @@ class Camera;
 class CObject;
 }
 
+namespace WallpaperEngine::Render::Objects {
+class CLight;
+}
+
 namespace WallpaperEngine::Render::Wallpapers {
 using namespace WallpaperEngine::Data::Model;
 
@@ -35,6 +39,24 @@ public:
     const glm::vec2* getParallaxDisplacement () const;
 
     [[nodiscard]] const std::vector<CObject*>& getObjectsByRenderOrder () const;
+
+    /** Slots per light kind; Wallpaper Engine's generated lighting takes four */
+    static constexpr std::size_t MAX_LIGHTS_PER_KIND = 4;
+
+    [[nodiscard]] int getPointLightCount () const;
+    [[nodiscard]] int getSpotLightCount () const;
+    [[nodiscard]] int getDirectionalLightCount () const;
+
+    [[nodiscard]] const glm::vec4* getPointLightColors () const;
+    [[nodiscard]] const glm::vec4* getPointLightOrigins () const;
+    [[nodiscard]] const glm::vec4* getSpotLightColors () const;
+    [[nodiscard]] const glm::vec4* getSpotLightOrigins () const;
+    [[nodiscard]] const glm::vec4* getSpotLightDirections () const;
+    [[nodiscard]] const glm::vec4* getSpotLightExponents () const;
+    [[nodiscard]] const glm::vec4* getDirectionalLightColors () const;
+    [[nodiscard]] const glm::vec4* getDirectionalLightDirections () const;
+    [[nodiscard]] const glm::vec3* getEyePosition () const;
+
     [[nodiscard]] const CObject* getObject (int id) const;
 
 protected:
@@ -49,6 +71,7 @@ private:
     void collectScriptedValues ();
     void registerScriptedValue (const UserSettingUniquePtr& setting);
     void updateScriptedValues ();
+    void updateLights ();
     /**
      * Visibility of the object itself, folded with the visibility of every
      * ancestor. Scene objects are a flat list with `parent` links, so a hidden
@@ -75,6 +98,19 @@ private:
     std::map<int, CObject*> m_objects = {};
     std::vector<CObject*> m_objectsByRenderOrder = {};
     std::vector<ScriptedDynamicValue*> m_scriptedValues = {};
+    std::vector<Objects::CLight*> m_lights = {};
+    glm::vec4 m_pointLightColors[MAX_LIGHTS_PER_KIND] = {};
+    glm::vec4 m_pointLightOrigins[MAX_LIGHTS_PER_KIND] = {};
+    glm::vec4 m_spotLightColors[MAX_LIGHTS_PER_KIND] = {};
+    glm::vec4 m_spotLightOrigins[MAX_LIGHTS_PER_KIND] = {};
+    glm::vec4 m_spotLightDirections[MAX_LIGHTS_PER_KIND] = {};
+    glm::vec4 m_spotLightExponents[MAX_LIGHTS_PER_KIND] = {};
+    glm::vec4 m_directionalLightColors[MAX_LIGHTS_PER_KIND] = {};
+    glm::vec4 m_directionalLightDirections[MAX_LIGHTS_PER_KIND] = {};
+    int m_pointLightCount = 0;
+    int m_spotLightCount = 0;
+    int m_directionalLightCount = 0;
+    glm::vec3 m_eyePosition = {};
     glm::vec2 m_mousePosition = {};
     glm::vec2 m_mousePositionLast = {};
     glm::vec2 m_mousePositionNormalized = {};

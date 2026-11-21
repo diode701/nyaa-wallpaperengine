@@ -116,6 +116,9 @@ private:
     glm::mat4 m_modelViewProjectionCopyInverse = {};
 
     glm::mat4 m_modelMatrix = {};
+    /** identity for the scene-space pass: those vertices already carry scene
+     *  coordinates, and lighting compares them against light positions */
+    glm::mat4 m_sceneModelMatrix = glm::mat4 (1.0f);
     glm::mat4 m_viewProjectionMatrix = {};
 
     std::shared_ptr<const CFBO> m_mainFBO = nullptr;

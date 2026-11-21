@@ -166,6 +166,34 @@ public:
 };
 
 /**
+ * A light in the scene. Wallpaper Engine's shaders take up to four lights
+ * through g_LightsPosition / g_LightsColorRadius; the renderer packs the
+ * lights nearest the camera into those arrays every frame.
+ */
+struct LightData {
+    /** Wallpaper Engine's own name: "point", "lpoint", "spot", "lspot", "directional" */
+    std::string type;
+    /** Colour, multiplied by intensity before it reaches the shaders */
+    UserSettingUniquePtr color;
+    UserSettingUniquePtr intensity;
+    UserSettingUniquePtr radius;
+    /** Falloff exponent (point/spot lights) */
+    float exponent = 1.0f;
+    /** Spot cone angles, in degrees */
+    float innerCone = 0.0f;
+    float outerCone = 0.0f;
+    /** Bake shadows into a shadow atlas; not implemented yet */
+    bool castShadow = false;
+};
+
+class Light : public Object, public LightData {
+public:
+    explicit Light (ObjectData data, LightData lightData) noexcept :
+	Object (std::move (data)), LightData (std::move (lightData)) { };
+    ~Light () override = default;
+};
+
+/**
  * Particle control points for forces and positions
  */
 struct ParticleControlPoint {

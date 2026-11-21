@@ -22,6 +22,21 @@ using namespace WallpaperEngine::Data::Model;
  */
 class ShaderUnit {
 public:
+    /**
+     * How many lights of each kind the scene's shaders have to handle. Wallpaper
+     * Engine bakes the scene's light counts into the generated LightingV1 module
+     * when it compiles the shader; the scene sets this before its objects are
+     * created. One wallpaper per process, so a process-wide setting is enough.
+     */
+    struct LightingLimits {
+	int point = 0;
+	int spot = 0;
+	int directional = 0;
+    };
+
+    static void setLightingLimits (const LightingLimits& limits);
+    [[nodiscard]] static const LightingLimits& getLightingLimits ();
+
     ShaderUnit (
 	const GLSLContext::UnitType type, std::string file, std::string content, const AssetLocator& assetLocator,
 	const ShaderConstantMap& constants, const TextureMap& passTextures, const TextureMap& overrideTextures,

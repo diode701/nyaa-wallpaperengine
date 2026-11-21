@@ -62,12 +62,21 @@ Everything in here was verified by running wallpapers, not by reading the code.
     exits without `$DISPLAY`; headless has no GL, so its GPU process fails and
     restarts in a loop: ~80 errors/s and a busy CPU).
 
-11. **No freeze while the screen is off.** Swap interval 0 (EGL and GLFW):
+11. **Lights.** Light objects were parsed as "not supported". The shaders'
+    `#require LightingV1` module was a stub returning black, and the executable
+    squashed world positions through the image's ortho matrix. Lights are now
+    parsed (colour, intensity, radius, exponent, cones), packed per kind into
+    the scene, uploaded as `g_LPoint_*`, `g_LSpot_*`, `g_LDirectional_*`, and
+    `LightingV1` is generated the way Wallpaper Engine generates it (PBR
+    helpers, no shadow paths). Scene-space passes use an identity model matrix
+    so `v_WorldPos` is a real scene position. Debug: `LWE_LIGHT_DEBUG`,
+    `LWE_NO_LIGHTS` (A/B).
+12. **No freeze while the screen is off.** Swap interval 0 (EGL and GLFW):
     with the default of 1, NVIDIA's EGL blocked in `eglSwapBuffers` until the
     compositor requested a frame; with the session locked / DPMS off it never
     did and the engine hung so hard SIGINT went unhandled. Frames are paced by
     the engine's own clock (fix 1).
-12. **Web diagnostics.** Load errors and renderer crashes are logged;
+13. **Web diagnostics.** Load errors and renderer crashes are logged;
     `LWE_WEB_DEBUG` prints the page's console.
 
 ## Building
@@ -113,6 +122,10 @@ Debug switches (environment, no effect on normal runs):
 
 ## Known gaps
 
+- Light objects: point, spot and directional work (generated `LightingV1`
+  module, per-kind packing, shader arrays); shadows, cookies and tube lights
+  are not implemented.
+
 - ~~**All audio silent with auto-mute on**~~ fixed: the playing detector
   skipped only streams with its own PID; in a Flatpak (PID namespace) that
   never matched, and with one engine per monitor the instances muted each
@@ -140,6 +153,7 @@ Debug switches (environment, no effect on normal runs):
 
 - screenshots of **web** and **video** wallpapers come out black even though they
   render on screen (affects only *screenshot on apply* / pywal theming in nyaa-paper; its grid thumbnails come from each wallpaper's preview file);
-- `Light` objects are still unsupported;
+- Lights are **supported for point, spot and directional** kinds (no shadows,
+  cookies or tube lights yet);
 - a few scenes use script APIs (`copy` / `subtract` / `toString` on layer values)
   that resolve to plain objects instead of `Vec3`.

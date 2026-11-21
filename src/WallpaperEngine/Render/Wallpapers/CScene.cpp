@@ -1,5 +1,6 @@
 #include "WallpaperEngine/Render/Objects/CImage.h"
 #include "WallpaperEngine/Render/Objects/CParticle.h"
+#include "WallpaperEngine/Render/Objects/CLight.h"
 #include "WallpaperEngine/Render/Objects/CSound.h"
 #include "WallpaperEngine/Render/Objects/CText.h"
 
@@ -11,6 +12,7 @@
 #include "WallpaperEngine/Data/Model/Wallpaper.h"
 #include "WallpaperEngine/Data/Parsers/ObjectParser.h"
 #include "WallpaperEngine/Input/InputContext.h"
+#include "WallpaperEngine/Render/Shaders/ShaderUnit.h"
 #include "WallpaperEngine/Scripting/ScriptEngine.h"
 
 #include <chrono>
@@ -108,6 +110,38 @@ CScene::CScene (
 
     glClearColor (clearColor.r, clearColor.g, clearColor.b, 1.0f);
 
+    // how many lights of each kind the generated LightingV1 module handles;
+    // has to be known before the first shader is compiled
+    {
+	Shaders::ShaderUnit::LightingLimits limits;
+
+	for (const auto& object : scene->objects) {
+	    if (!object->is<Light> ()) {
+		continue;
+	    }
+
+	    const std::string& type = object->as<Light> ()->type;
+
+	    if (type == "point" || type == "lpoint") {
+		limits.point += 1;
+	    } else if (type == "spot" || type == "lspot") {
+		limits.spot += 1;
+	    } else if (type == "directional") {
+		limits.directional += 1;
+	    }
+	}
+
+	limits.point = std::min (limits.point, static_cast<int> (MAX_LIGHTS_PER_KIND));
+	limits.spot = std::min (limits.spot, static_cast<int> (MAX_LIGHTS_PER_KIND));
+	limits.directional = std::min (limits.directional, static_cast<int> (MAX_LIGHTS_PER_KIND));
+
+	this->m_pointLightCount = limits.point;
+	this->m_spotLightCount = limits.spot;
+	this->m_directionalLightCount = limits.directional;
+
+	Shaders::ShaderUnit::setLightingLimits (limits);
+    }
+
     // create all objects based off their dependencies
     for (const auto& object : scene->objects) {
 	this->createObject (*object);
@@ -195,6 +229,7 @@ CScene::~CScene () {
     }
 
     this->m_objectsByRenderOrder.clear ();
+    this->m_lights.clear ();
     this->m_objects.clear ();
 }
 
@@ -244,6 +279,11 @@ Render::CObject* CScene::createObject (const Object& object) {
 	renderObject = new Objects::CText (*this, *object.as<Text> ());
     } else if (object.is<Particle> ()) {
 	renderObject = createParticleObject (*this, *object.as<Particle> ());
+    } else if (object.is<Light> ()) {
+	auto* light = new Objects::CLight (*this, *object.as<Light> ());
+
+	this->m_lights.push_back (light);
+	renderObject = light;
     } else {
 	sLog.debug ("Unknown object type, creating placeholder, empty object: ", object.id);
 	renderObject = new CObject (*this, object);
@@ -338,6 +378,11 @@ void CScene::collectScriptedValues () {
 	    this->registerScriptedValue (particle->angles);
 	    this->registerScriptedValue (particle->visible);
 	    this->registerScriptedValue (particle->parallaxDepth);
+	} else if (object->is<Light> ()) {
+	    const auto* light = object->as<Light> ();
+	    this->registerScriptedValue (light->color);
+	    this->registerScriptedValue (light->intensity);
+	    this->registerScriptedValue (light->radius);
 	} else if (object->is<Text> ()) {
 	    const auto* text = object->as<Text> ();
 	    this->registerScriptedValue (text->text);
@@ -354,6 +399,136 @@ void CScene::collectScriptedValues () {
 void CScene::updateScriptedValues () {
     for (const auto& scripted : this->m_scriptedValues) {
 	scripted->reevaluate (this);
+    }
+}
+
+int CScene::getPointLightCount () const { return this->m_pointLightCount; }
+
+int CScene::getSpotLightCount () const { return this->m_spotLightCount; }
+
+int CScene::getDirectionalLightCount () const { return this->m_directionalLightCount; }
+
+const glm::vec4* CScene::getPointLightColors () const { return this->m_pointLightColors; }
+
+const glm::vec4* CScene::getPointLightOrigins () const { return this->m_pointLightOrigins; }
+
+const glm::vec4* CScene::getSpotLightColors () const { return this->m_spotLightColors; }
+
+const glm::vec4* CScene::getSpotLightOrigins () const { return this->m_spotLightOrigins; }
+
+const glm::vec4* CScene::getSpotLightDirections () const { return this->m_spotLightDirections; }
+
+const glm::vec4* CScene::getSpotLightExponents () const { return this->m_spotLightExponents; }
+
+const glm::vec4* CScene::getDirectionalLightColors () const { return this->m_directionalLightColors; }
+
+const glm::vec4* CScene::getDirectionalLightDirections () const { return this->m_directionalLightDirections; }
+
+const glm::vec3* CScene::getEyePosition () const { return &this->m_eyePosition; }
+
+void CScene::updateLights () {
+    for (auto& color : this->m_pointLightColors) color = glm::vec4 (0.0f);
+    for (auto& origin : this->m_pointLightOrigins) origin = glm::vec4 (0.0f);
+    for (auto& color : this->m_spotLightColors) color = glm::vec4 (0.0f);
+    for (auto& origin : this->m_spotLightOrigins) origin = glm::vec4 (0.0f);
+    for (auto& direction : this->m_spotLightDirections) direction = glm::vec4 (0.0f);
+    for (auto& exponent : this->m_spotLightExponents) exponent = glm::vec4 (0.0f);
+    for (auto& color : this->m_directionalLightColors) color = glm::vec4 (0.0f);
+    for (auto& direction : this->m_directionalLightDirections) direction = glm::vec4 (0.0f);
+
+    const auto& camera = this->getCamera ();
+
+    this->m_eyePosition = camera.getEye ();
+
+    glm::vec3 forward = camera.getCenter () - camera.getEye ();
+
+    if (glm::length (forward) < 0.000001f) {
+	forward = glm::vec3 (0.0f, 0.0f, -1.0f);
+    }
+
+    forward = glm::normalize (forward);
+
+    struct Candidate {
+	const Objects::CLight* light;
+	glm::vec3 origin;
+	float depth;
+    };
+
+    std::vector<Candidate> points;
+    std::vector<Candidate> spots;
+    std::vector<Candidate> directionals;
+
+    // debugging aid: A/B a frame with and without its lights
+    const bool lightsDisabled = std::getenv ("LWE_NO_LIGHTS") != nullptr;
+
+    for (const auto* light : this->m_lights) {
+	if (lightsDisabled || light == nullptr || !this->isVisibleInHierarchy (light->getLight ())) {
+	    continue;
+	}
+
+	// an unlit light is not worth a slot
+	if (light->getIntensity () <= 0.0f || light->getRadius () <= 0.0f) {
+	    continue;
+	}
+
+	const std::string& type = light->getLight ().type;
+	const glm::vec3 origin = light->getOrigin ();
+	const Candidate candidate { light, origin, glm::dot (origin, forward) };
+
+	if (type == "point" || type == "lpoint") {
+	    points.push_back (candidate);
+	} else if (type == "spot" || type == "lspot") {
+	    spots.push_back (candidate);
+	} else if (type == "directional") {
+	    directionals.push_back (candidate);
+	}
+    }
+
+    // Wallpaper Engine keeps the lights nearest the camera when a kind has
+    // more lights than the shaders take
+    const auto byDepth = [] (const Candidate& left, const Candidate& right) { return left.depth < right.depth; };
+
+    std::stable_sort (points.begin (), points.end (), byDepth);
+    std::stable_sort (spots.begin (), spots.end (), byDepth);
+    std::stable_sort (directionals.begin (), directionals.end (), byDepth);
+
+    const auto pointCount = std::min<std::size_t> (points.size (), this->m_pointLightCount);
+    const auto spotCount = std::min<std::size_t> (spots.size (), this->m_spotLightCount);
+    const auto directionalCount = std::min<std::size_t> (directionals.size (), this->m_directionalLightCount);
+
+    for (std::size_t i = 0; i < pointCount; ++i) {
+	const auto* light = points[i].light;
+
+	this->m_pointLightColors[i]
+	    = glm::vec4 (light->getColor () * light->getIntensity (), light->getRadius ());
+	this->m_pointLightOrigins[i] = glm::vec4 (points[i].origin, light->getExponent ());
+    }
+
+    for (std::size_t i = 0; i < spotCount; ++i) {
+	const auto* light = spots[i].light;
+
+	this->m_spotLightColors[i] = glm::vec4 (light->getColor () * light->getIntensity (), light->getRadius ());
+	// cone angles travel as their cosines, as Wallpaper Engine passes them
+	this->m_spotLightOrigins[i]
+	    = glm::vec4 (spots[i].origin, std::cos (glm::radians (light->getInnerCone ())));
+	this->m_spotLightDirections[i]
+	    = glm::vec4 (light->getDirection (), std::cos (glm::radians (light->getOuterCone ())));
+	this->m_spotLightExponents[i] = glm::vec4 (light->getExponent (), 0.0f, 0.0f, 0.0f);
+    }
+
+    for (std::size_t i = 0; i < directionalCount; ++i) {
+	const auto* light = directionals[i].light;
+
+	this->m_directionalLightColors[i] = glm::vec4 (light->getColor () * light->getIntensity (), 1.0f);
+	// towards the light: it shines along its own x axis
+	this->m_directionalLightDirections[i] = glm::vec4 (-light->getDirection (), 0.0f);
+    }
+
+    if (std::getenv ("LWE_LIGHT_DEBUG") != nullptr) {
+	sLog.out (
+	    "Lights: ", this->m_lights.size (), " in scene; packed ", pointCount, " point, ", spotCount, " spot, ",
+	    directionalCount, " directional"
+	);
     }
 }
 
@@ -518,6 +693,8 @@ void CScene::renderFrame (const glm::ivec4& viewport) {
     // feed pointer changes to the scripts that own the affected objects; this
     // has to happen after the frame's globals (__layers, cursor position) exist
     this->dispatchMouseEvents ();
+
+    this->updateLights ();
 
     // update the parallax position if required
     if (this->getScene ().camera.parallax.enabled->value->getBool ()
