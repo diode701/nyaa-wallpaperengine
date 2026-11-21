@@ -329,7 +329,9 @@ DynamicValueUniquePtr ScriptEngine::jsToDynamicValue (JSValue val, DynamicValue:
 
     auto updateString = [&] {
 	const char* str = JS_ToCString (ctx, val);
-	result->update (str == nullptr ? "" : str);
+	// std::string, not const char*: a pointer converts to bool before it
+	// converts to std::string, so update(bool) would win and store `true`
+	result->update (std::string (str == nullptr ? "" : str));
 	JS_FreeCString (ctx, str);
     };
 
@@ -369,7 +371,9 @@ DynamicValueUniquePtr ScriptEngine::jsToDynamicValue (JSValue val, DynamicValue:
     }
     if (tag == JS_TAG_STRING) {
 	const char* str = JS_ToCString (ctx, val);
-	result->update (str == nullptr ? "" : str);
+	// std::string, not const char*: a pointer converts to bool before it
+	// converts to std::string, so update(bool) would win and store `true`
+	result->update (std::string (str == nullptr ? "" : str));
 	JS_FreeCString (ctx, str);
 	return result;
     }
@@ -982,6 +986,21 @@ static void syncLayerObjectProperties (
 	}
     }
 
+    // text layers read their own value in update() (thisLayer.text.toString()).
+    // A scripted text that has not produced anything yet has no type to copy;
+    // give it an empty string rather than leave the property undefined
+    if (object.is<Text> ()) {
+	JSValue text = JS_GetPropertyStr (ctx, layer, "text");
+
+	if (JS_IsUndefined (text)) {
+	    JS_SetPropertyStr (ctx, layer, "text", JS_NewString (ctx, ""));
+	    // a stand-in only: applyLayerProperty must not write it back
+	    JS_SetPropertyStr (ctx, layer, "__textPlaceholder", JS_NewBool (ctx, true));
+	}
+
+	JS_FreeValue (ctx, text);
+    }
+
     if (object.is<Image> ()) {
 	const auto& image = *object.as<Image> ();
 
@@ -1026,11 +1045,6 @@ static void syncLayerObjectProperties (
 
 static JSValue buildLayerObject (JSContext* ctx, const Object& object, float sceneWidth, float sceneHeight) {
     JSValue layer = JS_NewObject (ctx);
-
-    // text layers read their own value in update() (thisLayer.text.toString()).
-    // A value whose script has not produced anything yet has no type to copy,
-    // so start the property as an empty string instead of leaving it undefined.
-    JS_SetPropertyStr (ctx, layer, "text", JS_NewString (ctx, ""));
 
     syncLayerObjectProperties (ctx, layer, object, sceneWidth, sceneHeight);
 
@@ -1152,6 +1166,28 @@ static void applyLayerProperty (
     }
 
     JSValue jsValue = JS_GetPropertyStr (ctx, layer, property);
+
+    // the empty stand-in syncLayerObjectProperties puts on untyped text is not
+    // a value; only write text back once a script has actually set one
+    if (std::strcmp (property, "text") == 0 && JS_IsString (jsValue)) {
+	JSValue placeholder = JS_GetPropertyStr (ctx, layer, "__textPlaceholder");
+	const bool isPlaceholder = JS_ToBool (ctx, placeholder) == 1;
+	JS_FreeValue (ctx, placeholder);
+
+	if (isPlaceholder) {
+	    const char* current = JS_ToCString (ctx, jsValue);
+	    const bool untouched = current != nullptr && current[0] == '\0';
+	    JS_FreeCString (ctx, current);
+
+	    if (untouched) {
+		JS_FreeValue (ctx, jsValue);
+		return;
+	    }
+
+	    JS_SetPropertyStr (ctx, layer, "__textPlaceholder", JS_NewBool (ctx, false));
+	}
+    }
+
     if (!JS_IsUndefined (jsValue) && !JS_IsException (jsValue)) {
 	auto value = engine.jsToDynamicValue (jsValue, setting->value->getType ());
 	if (value) {

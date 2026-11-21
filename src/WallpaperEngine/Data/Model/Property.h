@@ -203,7 +203,10 @@ public:
 	this->PropertySceneTexture::update (value);
     }
 
-    void update (const std::string& value) override { this->m_value = value; }
+    void update (const std::string& value) override {
+	this->m_value = value;
+	this->DynamicValue::update (value);
+    }
 
     /** The chosen image (a path), empty when the user picked none */
     [[nodiscard]] std::string toString () const override { return this->m_value; }
@@ -250,7 +253,14 @@ public:
 	this->PropertyTextInput::update (value);
     }
 
-    void update (const std::string& value) override { this->m_value = value; }
+    // keep the value in the DynamicValue too: text layers and scripts are
+    // connected to it, and only DynamicValue::update notifies them
+    void update (const std::string& value) override {
+	this->m_value = value;
+	this->DynamicValue::update (value);
+    }
+
+    [[nodiscard]] std::string toString () const override { return this->m_value; }
 
     [[nodiscard]] std::string dump () const override {
 	std::stringstream ss;
