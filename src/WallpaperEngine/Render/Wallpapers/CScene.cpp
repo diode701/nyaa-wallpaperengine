@@ -631,8 +631,10 @@ void CScene::dispatchMouseEvents () {
 	dispatchTo ("cursorMove", chain);
     }
 
+    // LWE_FAKE_CLICK[=<seconds>]: hold the button from that moment on
+    const char* fakeClick = std::getenv ("LWE_FAKE_CLICK");
     const bool down = mouse.leftClick () == WallpaperEngine::Input::MouseClickStatus::Clicked
-	|| std::getenv ("LWE_FAKE_CLICK") != nullptr;
+	|| (fakeClick != nullptr && g_Time >= static_cast<float> (std::atof (fakeClick)));
 
     if (down != this->m_mouseDownLast) {
 	if (!chain.empty ()) {
@@ -828,8 +830,15 @@ void CScene::updateMouse (const glm::ivec4& viewport) {
 
 	if (std::sscanf (fake, "%f,%f", &fakeX, &fakeY) == 2) {
 	    // optional: sweep the fake pointer so drag handlers can be exercised
+	    // starts when the fake click does (LWE_FAKE_CLICK=<seconds>), so a
+	    // drag can begin on the layer under the starting point
 	    if (std::getenv ("LWE_FAKE_CURSOR_ANIMATE") != nullptr) {
-		fakeX += 0.12f * std::sin (g_Time * 1.5f);
+		const char* click = std::getenv ("LWE_FAKE_CLICK");
+		const float since = g_Time - (click != nullptr ? static_cast<float> (std::atof (click)) : 0.0f);
+
+		if (since > 0.0f) {
+		    fakeX += 0.12f * std::sin (since * 1.5f);
+		}
 	    }
 
 	    this->m_mousePositionNormalized = { fakeX, fakeY };

@@ -109,7 +109,15 @@ Everything in here was verified by running wallpapers, not by reading the code.
     (16:10, 3:2, a resized window) sampled outside the image: smeared or
     wrapped strips, text sliding off (Lonely Cat). It now compares aspect
     ratios and crops whichever axis overflows.
-19. **Web diagnostics.** Load errors and renderer crashes are logged;
+19. **Layer properties behave like Wallpaper Engine's.** `thisLayer.origin`,
+    `scale`, `angles`, `size` and `parallaxDepth` are accessors on a shared
+    layer prototype: reading returns a fresh Vec2/Vec3/Vec4, assigning stores a
+    copy. They were plain objects handed out by reference (and without Vec
+    methods), so `let s = thisLayer.size; s.x *= 0.5` resized the layer on
+    every pointer move. Groups report size 0 instead of the canvas, which made
+    drag scripts clamp to a point and bounce (Lonely Cat's clock slid around).
+    `LWE_FAKE_CLICK=<seconds>` presses at that time, for drag tests.
+20. **Web diagnostics.** Load errors and renderer crashes are logged;
     `LWE_WEB_DEBUG` prints the page's console.
 
 ## Building
@@ -147,7 +155,7 @@ Debug switches (environment, no effect on normal runs):
 | `LWE_SCRIPT_DEBUG` | script identity and source head on update failures |
 | `LWE_SHADER_DEBUG` | shader name + combos before compilation |
 | `LWE_SHADER_DUMP=<dir>` | dump every compiled vertex/fragment pair |
-| `LWE_FAKE_CURSOR=x,y` / `LWE_FAKE_CURSOR_ANIMATE` / `LWE_FAKE_CLICK` | drive the pointer without a display |
+| `LWE_FAKE_CURSOR=x,y` / `LWE_FAKE_CURSOR_ANIMATE` / `LWE_FAKE_CLICK[=seconds]` | drive the pointer without a display |
 | `LWE_AUDIO_DEBUG` | sum of the 16-band spectrum the scripts see |
 | `LWE_WEB_DEBUG` | print web wallpapers' console output (load errors and renderer crashes are always logged) |
 | `LWE_NO_CEF_SANDBOX` | disable Chromium's sandbox outside a Flatpak too |

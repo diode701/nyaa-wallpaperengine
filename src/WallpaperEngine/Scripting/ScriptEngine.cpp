@@ -756,6 +756,31 @@ globalThis.__weRunIntervals = function(bindingKey) {
     interval.callback();
   }
 };
+// Layer vector properties behave like Wallpaper Engine's: reading one returns
+// a fresh Vec2/Vec3/Vec4 (so `let s = thisLayer.size; s.x *= 2` does not resize
+// the layer), assigning stores a copy. Values live in __v_<name>.
+globalThis.__weToVec = function(v) {
+  if (v === null || typeof v !== 'object') return v;
+  if ('w' in v) return new Vec4(v.x, v.y, v.z, v.w);
+  if ('z' in v) return new Vec3(v.x, v.y, v.z);
+  return new Vec2(v.x, v.y);
+};
+globalThis.__weLayerProto = {};
+for (const name of ['origin', 'scale', 'angles', 'size', 'parallaxDepth']) {
+  const key = '__v_' + name;
+  Object.defineProperty(globalThis.__weLayerProto, name, {
+    configurable: true,
+    enumerable: true,
+    get() { return __weToVec(this[key]); },
+    set(value) {
+      this[key] = (value !== null && typeof value === 'object')
+        ? ('w' in value ? { x: +value.x || 0, y: +value.y || 0, z: +value.z || 0, w: +value.w || 0 }
+          : 'z' in value ? { x: +value.x || 0, y: +value.y || 0, z: +value.z || 0 }
+          : { x: +value.x || 0, y: +value.y || 0 })
+        : value;
+    }
+  });
+}
 globalThis.__missingLayer = { origin: new Vec3(0, 0, 0), scale: new Vec3(1, 1, 1), angles: new Vec3(0, 0, 0), visible: false, alpha: 0, color: new Vec4(0, 0, 0, 0), parallaxDepth: new Vec2(0, 0) };
 globalThis.engine = {
   runtime: 0,
@@ -967,11 +992,9 @@ static void syncLayerObjectProperties (
 	objectSize = object.as<Image> ()->size;
     }
 
-    if (objectSize.x <= 0.0f || objectSize.y <= 0.0f) {
-	// group layers have no size of their own; the canvas is the best
-	// approximation and keeps scripts from dereferencing undefined
-	objectSize = { sceneWidth, sceneHeight };
-    }
+    // groups have no size of their own: report 0 (a defined Vec3, so scripts
+    // never dereference undefined). The canvas size used before made drag
+    // scripts clamp the origin to a single point and bounce it around.
 
     JS_SetPropertyStr (ctx, layer, "size", constructVectorObject (ctx, "Vec3", { objectSize.x, objectSize.y, 0.0 }));
     JS_SetPropertyStr (ctx, layer, "name", JS_NewString (ctx, object.name.c_str ()));
@@ -1043,8 +1066,20 @@ static void syncLayerObjectProperties (
     }
 }
 
+/** A layer object on the shared prototype with Wallpaper Engine's vector accessors */
+static JSValue newLayerObject (JSContext* ctx) {
+    JSValue global = JS_GetGlobalObject (ctx);
+    JSValue proto = JS_GetPropertyStr (ctx, global, "__weLayerProto");
+    JS_FreeValue (ctx, global);
+
+    JSValue layer = JS_IsObject (proto) ? JS_NewObjectProto (ctx, proto) : JS_NewObject (ctx);
+    JS_FreeValue (ctx, proto);
+
+    return layer;
+}
+
 static JSValue buildLayerObject (JSContext* ctx, const Object& object, float sceneWidth, float sceneHeight) {
-    JSValue layer = JS_NewObject (ctx);
+    JSValue layer = newLayerObject (ctx);
 
     syncLayerObjectProperties (ctx, layer, object, sceneWidth, sceneHeight);
 
@@ -1097,7 +1132,7 @@ static void rebuildSceneLayers (
  * thisLayer.origin.copy() / .subtract() / .toString() throws.
  */
 static JSValue buildDefaultLayerObject (JSContext* ctx) {
-    JSValue layer = JS_NewObject (ctx);
+    JSValue layer = newLayerObject (ctx);
 
     JS_SetPropertyStr (ctx, layer, "id", JS_NewInt32 (ctx, -1));
     JS_SetPropertyStr (ctx, layer, "name", JS_NewString (ctx, ""));
