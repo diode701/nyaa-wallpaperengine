@@ -1116,7 +1116,10 @@ const std::vector<CEffect*>& CImage::getEffects () const { return this->m_effect
 const Effects::CMaterial* CImage::getMaterial () const { return this->m_material; }
 
 glm::vec2 CImage::getSize () const {
-    if (this->m_texture == nullptr) {
+    // a user-picked image is fitted to the layer, like Wallpaper Engine does;
+    // the material's own texture is shown at its real size
+    if (this->m_texture == nullptr
+	|| (this->m_textureIsUserChoice && this->getImage ().size.x > 0.0f && this->getImage ().size.y > 0.0f)) {
 	return this->getImage ().size;
     }
 

@@ -81,7 +81,18 @@ Everything in here was verified by running wallpapers, not by reading the code.
     with MEDIA_ELEMENT_ERROR "Format error". The handler now parses `Range`,
     answers 206 with `Content-Range`/`Accept-Ranges` and streams just the range
     (upstream PR #729, applied).
-14. **Web diagnostics.** Load errors and renderer crashes are logged;
+14. **Scripts that read their own layer.** `thisLayer.text` was undefined on
+    first evaluation (text layers do `thisLayer.text.toString()`), and
+    `thisLayer.getEffect(i).visible` did not exist; effect-visibility scripts
+    ran with no layer bound. All three work now.
+15. **Scenetexture properties (user images, presets).** A material's
+    `usertextures` slot names a property: empty keeps the default texture
+    (it used to replace it and render black), set loads the chosen file.
+    PNG/JPG/BMP/TGA load as images, animated GIFs as frame-accurate animated
+    textures; user images are fitted to the layer. Overrides aimed at text
+    label properties are ignored instead of aborting the wallpaper (this
+    crashed the Yukinoshita preset, `3413953090`).
+16. **Web diagnostics.** Load errors and renderer crashes are logged;
     `LWE_WEB_DEBUG` prints the page's console.
 
 ## Building

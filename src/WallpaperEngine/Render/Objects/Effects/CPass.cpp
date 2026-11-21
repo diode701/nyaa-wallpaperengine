@@ -564,8 +564,11 @@ void CPass::setupShaders () {
 	= this->m_override.shaderOverride.has_value () ? this->m_override.shaderOverride.value () : this->m_pass.shader;
 
     TextureMap passTextures = this->m_pass.textures;
-    for (const auto& [index, texture] : this->m_pass.usertextures) {
-	passTextures.insert_or_assign (index, texture);
+    for (const auto& [index, propertyName] : this->m_pass.usertextures) {
+	// an empty scenetexture keeps the material's default texture
+	if (const auto chosen = this->m_renderable.resolveUserTexture (propertyName); chosen.has_value ()) {
+	    passTextures.insert_or_assign (index, *chosen);
+	}
     }
 
     this->m_shader = new Render::Shaders::Shader (
@@ -701,15 +704,18 @@ void CPass::setupTextureUniforms () {
 	}
     }
 
-    for (const auto& [index, textureName] : this->m_pass.usertextures) {
+    for (const auto& [index, propertyName] : this->m_pass.usertextures) {
+	const auto chosen = this->m_renderable.resolveUserTexture (propertyName);
+
+	// no image chosen: the slot keeps the material's default texture
+	if (!chosen.has_value ()) {
+	    continue;
+	}
+
 	try {
-	    if (textureName.find ("_rt_") == 0 || textureName.find ("_alias_") == 0) {
-		this->m_textures[index] = this->resolveFBO (textureName);
-	    } else if (!textureName.empty ()) {
-		this->m_textures[index] = this->getContext ().resolveTexture (textureName);
-	    }
+	    this->m_textures[index] = this->getContext ().resolveTexture (*chosen);
 	} catch (std::runtime_error& ex) {
-	    sLog.error ("Cannot resolve user texture ", textureName, " for pass ", ex.what ());
+	    sLog.error ("Cannot load image ", *chosen, " chosen for ", propertyName, ": ", ex.what ());
 	}
     }
 

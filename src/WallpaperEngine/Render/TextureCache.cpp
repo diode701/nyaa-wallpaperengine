@@ -10,6 +10,7 @@
 #include "WallpaperEngine/Data/Parsers/TextureParser.h"
 
 #include <algorithm>
+#include <cctype>
 #include <array>
 #include <chrono>
 #include <cstring>
@@ -337,6 +338,99 @@ std::shared_ptr<const TextureProvider> tryCreateImageTexture (RenderContext& con
     return std::make_shared<CTexture> (context, std::move (texture));
 }
 
+/** Image files a scenetexture property can point at (Wallpaper Engine lets users pick any of these) */
+bool isImageFile (const std::string& name) {
+    std::string extension = std::filesystem::path (name).extension ().string ();
+    std::ranges::transform (extension, extension.begin (), [] (unsigned char c) { return std::tolower (c); });
+
+    return extension == ".gif" || extension == ".png" || extension == ".jpg" || extension == ".jpeg"
+	|| extension == ".bmp" || extension == ".tga";
+}
+
+std::vector<char> readStream (std::istream& stream) {
+    return { std::istreambuf_iterator<char> (stream), std::istreambuf_iterator<char> () };
+}
+
+/**
+ * An animated GIF as an animated texture: one GL image per frame and a frame
+ * list with the GIF's own delays, the layout the engine already uses for
+ * animated .tex files. Single-frame GIFs (and anything stb cannot read as an
+ * animation) return nullptr and go through the still-image path.
+ */
+std::shared_ptr<const TextureProvider> tryCreateAnimatedGifTexture (RenderContext& context, const std::vector<char>& bytes) {
+    int* delays = nullptr;
+    int width = 0;
+    int height = 0;
+    int frameCount = 0;
+    int channels = 0;
+
+    stbi_uc* pixels = stbi_load_gif_from_memory (
+	reinterpret_cast<const stbi_uc*> (bytes.data ()), static_cast<int> (bytes.size ()), &delays, &width, &height,
+	&frameCount, &channels, 4
+    );
+
+    if (pixels == nullptr || width <= 0 || height <= 0 || frameCount <= 1) {
+	stbi_image_free (pixels);
+	stbi_image_free (delays);
+	return nullptr;
+    }
+
+    const std::size_t frameBytes = static_cast<std::size_t> (width) * height * 4;
+
+    // a decoded GIF is frames x width x height x 4 bytes; past this the
+    // first frame is shown instead of exhausting memory
+    constexpr std::size_t maxDecodedBytes = 512ull * 1024 * 1024;
+
+    if (frameBytes * frameCount > maxDecodedBytes) {
+	sLog.error ("Animated image too large to keep every frame (", frameCount, " frames of ", width, "x", height, "), showing the first one");
+	stbi_image_free (pixels);
+	stbi_image_free (delays);
+	return nullptr;
+    }
+
+    auto texture = std::make_unique<Texture> ();
+    texture->containerVersion = ContainerVersion_TEXB0001;
+    texture->flags = TextureFlags_ClampUVs | TextureFlags_IsGif;
+    texture->width = static_cast<uint32_t> (width);
+    texture->height = static_cast<uint32_t> (height);
+    texture->textureWidth = static_cast<uint32_t> (width);
+    texture->textureHeight = static_cast<uint32_t> (height);
+    texture->gifWidth = static_cast<uint32_t> (width);
+    texture->gifHeight = static_cast<uint32_t> (height);
+    texture->format = TextureFormat_ARGB8888;
+    texture->freeImageFormat = FIF_UNKNOWN;
+    texture->imageCount = static_cast<uint32_t> (frameCount);
+
+    for (int i = 0; i < frameCount; ++i) {
+	auto mipmap = std::make_shared<Mipmap> ();
+	mipmap->width = static_cast<uint32_t> (width);
+	mipmap->height = static_cast<uint32_t> (height);
+	mipmap->uncompressedSize = static_cast<int> (frameBytes);
+	mipmap->uncompressedData = std::make_unique<char[]> (frameBytes);
+	std::memcpy (mipmap->uncompressedData.get (), pixels + frameBytes * i, frameBytes);
+	texture->images.emplace (i, MipmapList { mipmap });
+
+	// stb reports milliseconds; like browsers, treat 0-10 ms as 100 ms
+	const int delay = (delays != nullptr && delays[i] > 10) ? delays[i] : 100;
+
+	auto frame = std::make_shared<Frame> ();
+	frame->frameNumber = static_cast<uint32_t> (i);
+	frame->frametime = static_cast<float> (delay) / 1000.0f;
+	frame->x = 0.0f;
+	frame->y = 0.0f;
+	frame->width1 = static_cast<float> (width);
+	frame->width2 = 0.0f;
+	frame->height1 = static_cast<float> (height);
+	frame->height2 = 0.0f;
+	texture->frames.push_back (frame);
+    }
+
+    stbi_image_free (pixels);
+    stbi_image_free (delays);
+
+    return std::make_shared<CTexture> (context, std::move (texture));
+}
+
 std::shared_ptr<const TextureProvider> tryLoadMediaThumbnailUrl (RenderContext& context, const std::string& artUrl) {
     std::vector<char> bytes;
     if (artUrl.rfind ("file:", 0) == 0) {
@@ -410,6 +504,45 @@ std::shared_ptr<const TextureProvider> TextureCache::resolve (const std::string&
 
     if (const auto found = this->m_textureCache.find (filename); found != this->m_textureCache.end ()) {
 	return found->second;
+    }
+
+    // an image file picked through a scenetexture property: an absolute path
+    // (a preset's own files, resolved by the caller) or a file in a project
+    if (isImageFile (filename)) {
+	std::vector<char> bytes;
+	const std::filesystem::path path (filename);
+
+	if (path.is_absolute ()) {
+	    std::ifstream stream (path, std::ios::binary);
+
+	    if (stream) {
+		bytes = readStream (stream);
+	    }
+	} else {
+	    for (const auto& project : this->getContext ().getApp ().getBackgrounds () | std::views::values) {
+		try {
+		    const auto stream = project->assetLocator->read (filename);
+		    bytes = readStream (*stream);
+		    break;
+		} catch (AssetLoadException&) {
+		    // not in this project
+		}
+	    }
+	}
+
+	auto texture = tryCreateAnimatedGifTexture (this->getContext (), bytes);
+
+	if (texture == nullptr) {
+	    texture = tryCreateImageTexture (this->getContext (), bytes);
+	}
+
+	if (texture == nullptr) {
+	    throw AssetLoadException ("Cannot read image", filename, std::error_code ());
+	}
+
+	this->store (filename, texture);
+
+	return texture;
     }
 
     // search for the texture in all the different containers just in case

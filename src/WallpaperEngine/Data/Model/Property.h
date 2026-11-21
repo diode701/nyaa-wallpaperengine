@@ -179,9 +179,10 @@ public:
     explicit PropertyText (PropertyData data) : Property (std::move (data)) { }
 
     using Property::update;
-    void update (const std::string& value) override {
-	throw std::runtime_error ("PropertyText::update() is not implemented");
-    }
+    // A text property is a label in the properties panel; it has no value.
+    // Presets and user configs still carry an entry for it, so accept and
+    // ignore one instead of aborting the whole wallpaper.
+    void update (const std::string& value) override { }
 
     [[nodiscard]] std::string toString () const override { return this->text; }
 
@@ -203,6 +204,9 @@ public:
     }
 
     void update (const std::string& value) override { this->m_value = value; }
+
+    /** The chosen image (a path), empty when the user picked none */
+    [[nodiscard]] std::string toString () const override { return this->m_value; }
 
     [[nodiscard]] std::string dump () const override {
 	std::stringstream ss;
