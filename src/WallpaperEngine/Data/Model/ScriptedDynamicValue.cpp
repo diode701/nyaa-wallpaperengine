@@ -22,6 +22,14 @@ ScriptedDynamicValue::ScriptedDynamicValue (
 	}
     }
 
+    // Start from the stored value. Scripts that read their own property
+    // (thisLayer.text.toString() is common in text layers) would otherwise
+    // see undefined until the first successful evaluation, and that first one
+    // is exactly the one that reads the property.
+    if (this->m_baseValue.getType () != DynamicValue::Null) {
+	this->update (this->m_baseValue);
+    }
+
     // Do an initial evaluation
     this->reevaluate ();
 }

@@ -908,6 +908,40 @@ static JSValue buildScriptPropertiesObject (
 static JSValue jsNoop (JSContext*, JSValueConst, int, JSValueConst*) { return JS_UNDEFINED; }
 static JSValue jsZero (JSContext* ctx, JSValueConst, int, JSValueConst*) { return JS_NewInt32 (ctx, 0); }
 
+static JSValue jsGetEffect (JSContext* ctx, JSValueConst thisValue, int argc, JSValueConst* argv) {
+    if (argc < 1) {
+	return JS_UNDEFINED;
+    }
+
+    int32_t index = 0;
+
+    if (JS_ToInt32 (ctx, &index, argv[0]) < 0 || index < 0) {
+	JS_FreeValue (ctx, JS_GetException (ctx));
+	return JS_UNDEFINED;
+    }
+
+    JSValue effects = JS_GetPropertyStr (ctx, thisValue, "__effects");
+
+    if (!JS_IsArray (effects)) {
+	JS_FreeValue (ctx, effects);
+	effects = JS_NewArray (ctx);
+    }
+
+    JSValue effect = JS_GetPropertyUint32 (ctx, effects, index);
+
+    JS_FreeValue (ctx, effects);
+
+    if (!JS_IsObject (effect)) {
+	// no such effect (or the scene is not built yet): a detached stand-in,
+	// so `getEffect(i).visible = x` is a no-op instead of a TypeError
+	JS_FreeValue (ctx, effect);
+	effect = JS_NewObject (ctx);
+	JS_SetPropertyStr (ctx, effect, "visible", JS_NewBool (ctx, true));
+    }
+
+    return effect;
+}
+
 static JSValue jsGetTextureAnimation (JSContext* ctx, JSValueConst, int, JSValueConst*) {
     JSValue animation = JS_NewObject (ctx);
     JS_SetPropertyStr (ctx, animation, "pause", JS_NewCFunction (ctx, jsNoop, "pause", 0));
@@ -948,6 +982,41 @@ static void syncLayerObjectProperties (
 	}
     }
 
+    if (object.is<Image> ()) {
+	const auto& image = *object.as<Image> ();
+
+	JSValue effects = JS_GetPropertyStr (ctx, layer, "__effects");
+
+	if (!JS_IsArray (effects)) {
+	    JS_FreeValue (ctx, effects);
+	    effects = JS_NewArray (ctx);
+	    JS_SetPropertyStr (ctx, layer, "__effects", JS_DupValue (ctx, effects));
+	}
+
+	for (std::size_t i = 0; i < image.effects.size (); ++i) {
+	    const auto& effect = image.effects[i];
+
+	    if (!effect || !effect->visible || !effect->visible->value) {
+		continue;
+	    }
+
+	    JSValue state = JS_GetPropertyUint32 (ctx, effects, static_cast<uint32_t> (i));
+
+	    if (!JS_IsObject (state)) {
+		JS_FreeValue (ctx, state);
+		state = JS_NewObject (ctx);
+		JS_SetPropertyUint32 (ctx, effects, static_cast<uint32_t> (i), JS_DupValue (ctx, state));
+	    }
+
+	    JS_SetPropertyStr (ctx, state, "visible", JS_NewBool (ctx, effect->visible->value->getBool ()));
+	    JS_FreeValue (ctx, state);
+	}
+
+	JS_SetPropertyStr (ctx, layer, "getEffect", JS_NewCFunction (ctx, jsGetEffect, "getEffect", 1));
+
+	JS_FreeValue (ctx, effects);
+    }
+
     if (object.is<Sound> ()) {
 	JS_SetPropertyStr (ctx, layer, "volume", JS_NewFloat64 (ctx, 1.0));
 	JS_SetPropertyStr (ctx, layer, "play", JS_NewCFunction (ctx, jsNoop, "play", 0));
@@ -957,6 +1026,12 @@ static void syncLayerObjectProperties (
 
 static JSValue buildLayerObject (JSContext* ctx, const Object& object, float sceneWidth, float sceneHeight) {
     JSValue layer = JS_NewObject (ctx);
+
+    // text layers read their own value in update() (thisLayer.text.toString()).
+    // A value whose script has not produced anything yet has no type to copy,
+    // so start the property as an empty string instead of leaving it undefined.
+    JS_SetPropertyStr (ctx, layer, "text", JS_NewString (ctx, ""));
+
     syncLayerObjectProperties (ctx, layer, object, sceneWidth, sceneHeight);
 
     return layer;
@@ -1026,6 +1101,7 @@ static JSValue buildDefaultLayerObject (JSContext* ctx) {
 	ctx, layer, "getTextureAnimation", JS_NewCFunction (ctx, jsGetTextureAnimation, "getTextureAnimation", 0)
     );
     JS_SetPropertyStr (ctx, layer, "getAnimation", JS_NewCFunction (ctx, jsGetTextureAnimation, "getAnimation", 0));
+    JS_SetPropertyStr (ctx, layer, "getEffect", JS_NewCFunction (ctx, jsGetEffect, "getEffect", 1));
 
     return layer;
 }
@@ -1123,6 +1199,34 @@ static void applyLayerUpdates (
 
 	for (const char* property : { "origin", "text", "scale", "angles", "visible", "alpha", "color", "parallaxDepth", "pointSize" }) {
 	    applyLayerProperty (ctx, engine, layer, *object, property);
+	}
+
+	// scripts toggle effects through thisLayer.getEffect(i).visible
+	if (object->is<Image> ()) {
+	    const auto& image = *object->as<Image> ();
+	    JSValue effects = JS_GetPropertyStr (ctx, layer, "__effects");
+
+	    if (JS_IsArray (effects)) {
+		for (std::size_t i = 0; i < image.effects.size (); ++i) {
+		    const auto& effect = image.effects[i];
+
+		    if (!effect || !effect->visible || !effect->visible->value) {
+			continue;
+		    }
+
+		    JSValue state = JS_GetPropertyUint32 (ctx, effects, static_cast<uint32_t> (i));
+		    JSValue visible = JS_GetPropertyStr (ctx, state, "visible");
+
+		    if (JS_IsBool (visible)) {
+			effect->visible->value->update (JS_ToBool (ctx, visible) != 0);
+		    }
+
+		    JS_FreeValue (ctx, visible);
+		    JS_FreeValue (ctx, state);
+		}
+	    }
+
+	    JS_FreeValue (ctx, effects);
 	}
 
 	JS_FreeValue (ctx, layer);

@@ -247,6 +247,13 @@ ObjectParser::parseImage (const JSON& it, const Project& project, ObjectData bas
     bindScriptContext (result->color, result->id, result->name, "color");
     bindScriptContext (result->parallaxDepth, result->id, result->name, "parallaxDepth");
 
+    // effect visibility scripts use thisLayer (thisLayer.getEffect(i).visible)
+    for (const auto& effect : result->effects) {
+	if (effect != nullptr) {
+	    bindScriptContext (effect->visible, result->id, result->name, "effectvisible");
+	}
+    }
+
     const auto instance = it.optional ("instance");
     if (instance.has_value () && instance->is_object () && !result->model->material->passes.empty ()) {
 	auto& firstPass = **result->model->material->passes.begin ();
