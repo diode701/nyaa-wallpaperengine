@@ -2,7 +2,7 @@
 
 A fork of [linux-wallpaperengine](https://github.com/Almamu/linux-wallpaperengine)
 by Almamu, maintained as the engine bundled with
-[nyaa-paper](https://github.com/diode701/nyaa-paper), a Wallpaper Engine
+[nyaa-paper](https://github.com/diode701/nyaapaper), a Wallpaper Engine
 front end for Linux (Rust daemon + Qt/QML client, shipped as a Flatpak).
 
 It runs Steam Workshop wallpapers (scene, video and web) on Linux desktops.
@@ -29,7 +29,7 @@ Every change, why it was needed and how it was verified: [FORK-NOTES.md](FORK-NO
 ## Using it
 
 The supported way is the nyaa-paper Flatpak, which builds this tree:
-see the [releases](https://github.com/diode701/nyaa-paper/releases).
+see the [releases](https://github.com/diode701/nyaapaper/releases).
 
 To build it on its own:
 
