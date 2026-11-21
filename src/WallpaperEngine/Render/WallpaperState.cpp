@@ -114,19 +114,29 @@ template <> void WallpaperState::updateTextureUVs<WallpaperState::TextureUVsScal
 template <> void WallpaperState::updateTextureUVs<WallpaperState::TextureUVsScaling::DefaultUVs> () {
     this->resetUVs ();
 
-    const int viewportWidth = this->getViewportWidth ();
-    const int viewportHeight = this->getViewportHeight ();
-    const int projectionWidth = this->getProjectionWidth ();
-    const int projectionHeight = this->getProjectionHeight ();
+    const float viewportWidth = this->getViewportWidth ();
+    const float viewportHeight = this->getViewportHeight ();
+    const float projectionWidth = this->getProjectionWidth ();
+    const float projectionHeight = this->getProjectionHeight ();
 
-    if ((viewportHeight > viewportWidth && projectionWidth >= projectionHeight)
-	|| (viewportWidth > viewportHeight && projectionHeight > projectionWidth)) {
-	updateUs (projectionWidth, projectionHeight);
+    if (viewportWidth <= 0.0f || viewportHeight <= 0.0f || projectionWidth <= 0.0f || projectionHeight <= 0.0f) {
+	return;
     }
 
-    if ((viewportWidth > viewportHeight && projectionWidth >= projectionHeight)
-	|| (viewportHeight > viewportWidth && projectionHeight > projectionWidth)) {
-	updateVs (projectionWidth, projectionHeight);
+    // Cover the output keeping the scene's aspect: crop whichever axis
+    // overflows. The old rule picked the axis from the orientations alone
+    // (landscape on landscape always cropped height), so an output relatively
+    // taller than the scene (16:10, 3:2, a resized window) sampled past the
+    // top and bottom of the image: smeared or wrapped strips.
+    const float viewportAspect = viewportWidth / viewportHeight;
+    const float projectionAspect = projectionWidth / projectionHeight;
+
+    if (viewportAspect > projectionAspect) {
+	// wider than the scene: full width, crop top and bottom
+	this->updateVs (static_cast<int> (projectionWidth), static_cast<int> (projectionHeight));
+    } else if (viewportAspect < projectionAspect) {
+	// taller than the scene: full height, crop the sides
+	this->updateUs (static_cast<int> (projectionWidth), static_cast<int> (projectionHeight));
     }
 }
 

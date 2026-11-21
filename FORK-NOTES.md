@@ -104,7 +104,12 @@ Everything in here was verified by running wallpapers, not by reading the code.
     measurement), and no invented text: the name-based fallbacks that filled
     any empty "Clock"/"Date" layer with the local time, and two hard-coded
     position nudges for specific wallpapers, are gone.
-18. **Web diagnostics.** Load errors and renderer crashes are logged;
+18. **Default scaling covers any output shape.** It chose the cropped axis
+    from orientation alone, so an output relatively taller than the scene
+    (16:10, 3:2, a resized window) sampled outside the image: smeared or
+    wrapped strips, text sliding off (Lonely Cat). It now compares aspect
+    ratios and crops whichever axis overflows.
+19. **Web diagnostics.** Load errors and renderer crashes are logged;
     `LWE_WEB_DEBUG` prints the page's console.
 
 ## Building
