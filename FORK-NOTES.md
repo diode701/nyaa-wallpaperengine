@@ -76,7 +76,12 @@ Everything in here was verified by running wallpapers, not by reading the code.
     compositor requested a frame; with the session locked / DPMS off it never
     did and the engine hung so hard SIGINT went unhandled. Frames are paced by
     the engine's own clock (fix 1).
-13. **Web diagnostics.** Load errors and renderer crashes are logged;
+13. **Web media can load.** The `wp` scheme answered with status 200 and no
+    length, so `<audio>`/`<video>` (Yui's and Yukino's pages, web videos) failed
+    with MEDIA_ELEMENT_ERROR "Format error". The handler now parses `Range`,
+    answers 206 with `Content-Range`/`Accept-Ranges` and streams just the range
+    (upstream PR #729, applied).
+14. **Web diagnostics.** Load errors and renderer crashes are logged;
     `LWE_WEB_DEBUG` prints the page's console.
 
 ## Building
