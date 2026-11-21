@@ -1,4 +1,6 @@
 #include "DynamicValue.h"
+#include <sstream>
+#include <cmath>
 #include "WallpaperEngine/Logging/Log.h"
 
 using namespace WallpaperEngine::Data::Model;
@@ -97,6 +99,7 @@ void DynamicValue::update (const float newValue) {
     this->m_string = "";
     this->m_type = UnderlyingType::Float;
 
+    this->applyCondition ();
     this->propagate ();
 }
 
@@ -113,6 +116,7 @@ void DynamicValue::update (const int newValue) {
     this->m_string = "";
     this->m_type = UnderlyingType::Int;
 
+    this->applyCondition ();
     this->propagate ();
 }
 
@@ -129,6 +133,7 @@ void DynamicValue::update (const bool newValue) {
     this->m_string = "";
     this->m_type = UnderlyingType::Boolean;
 
+    this->applyCondition ();
     this->propagate ();
 }
 
@@ -145,6 +150,7 @@ void DynamicValue::update (const glm::vec2& newValue) {
     this->m_string = "";
     this->m_type = UnderlyingType::Vec2;
 
+    this->applyCondition ();
     this->propagate ();
 }
 
@@ -161,6 +167,7 @@ void DynamicValue::update (const glm::vec3& newValue) {
     this->m_string = "";
     this->m_type = UnderlyingType::Vec3;
 
+    this->applyCondition ();
     this->propagate ();
 }
 
@@ -177,6 +184,7 @@ void DynamicValue::update (const glm::vec4& newValue) {
     this->m_string = "";
     this->m_type = UnderlyingType::Vec4;
 
+    this->applyCondition ();
     this->propagate ();
 }
 
@@ -193,6 +201,7 @@ void DynamicValue::update (const glm::ivec2& newValue) {
     this->m_string = "";
     this->m_type = UnderlyingType::IVec2;
 
+    this->applyCondition ();
     this->propagate ();
 }
 
@@ -209,6 +218,7 @@ void DynamicValue::update (const glm::ivec3& newValue) {
     this->m_string = "";
     this->m_type = UnderlyingType::IVec3;
 
+    this->applyCondition ();
     this->propagate ();
 }
 
@@ -225,6 +235,7 @@ void DynamicValue::update (const glm::ivec4& newValue) {
     this->m_string = "";
     this->m_type = UnderlyingType::IVec4;
 
+    this->applyCondition ();
     this->propagate ();
 }
 
@@ -241,20 +252,8 @@ void DynamicValue::update (const std::string& newValue) {
     this->m_string = newValue;
     this->m_type = UnderlyingType::String;
 
-    if (this->m_condition.has_value ()) {
-	const bool boolValue = this->m_condition.value ().condition == newValue;
-	this->m_ivec4 = glm::ivec4 (boolValue ? 1 : 0);
-	this->m_ivec3 = glm::ivec3 (boolValue ? 1 : 0);
-	this->m_ivec2 = glm::ivec2 (boolValue ? 1 : 0);
-	this->m_vec2 = glm::vec2 (boolValue ? 1.0f : 0.0f);
-	this->m_vec3 = glm::vec3 (boolValue ? 1.0f : 0.0f);
-	this->m_vec4 = glm::vec4 (boolValue ? 1.0f : 0.0f);
-	this->m_float = boolValue ? 1.0f : 0.0f;
-	this->m_int = boolValue ? 1 : 0;
-	this->m_bool = boolValue;
-	this->m_type = UnderlyingType::Boolean;
-    }
 
+    this->applyCondition ();
     this->propagate ();
 }
 
@@ -271,20 +270,8 @@ void DynamicValue::update (const DynamicValue& other) {
     this->m_string = other.getString ();
     this->m_type = other.getType ();
 
-    if (this->m_condition.has_value () && other.getType () == UnderlyingType::String) {
-	const bool boolValue = this->m_condition.value ().condition == other.getString ();
-	this->m_ivec4 = glm::ivec4 (boolValue ? 1 : 0);
-	this->m_ivec3 = glm::ivec3 (boolValue ? 1 : 0);
-	this->m_ivec2 = glm::ivec2 (boolValue ? 1 : 0);
-	this->m_vec2 = glm::vec2 (boolValue ? 1.0f : 0.0f);
-	this->m_vec3 = glm::vec3 (boolValue ? 1.0f : 0.0f);
-	this->m_vec4 = glm::vec4 (boolValue ? 1.0f : 0.0f);
-	this->m_float = boolValue ? 1.0f : 0.0f;
-	this->m_int = boolValue ? 1 : 0;
-	this->m_bool = boolValue;
-	this->m_type = UnderlyingType::Boolean;
-    }
 
+    this->applyCondition ();
     this->propagate ();
 }
 
@@ -300,6 +287,7 @@ void DynamicValue::update () {
     this->m_bool = false;
     this->m_type = UnderlyingType::Null;
 
+    this->applyCondition ();
     this->propagate ();
 }
 
@@ -349,7 +337,62 @@ void DynamicValue::disconnect () {
     this->m_connections.clear ();
 }
 
-void DynamicValue::attachCondition (const ConditionInfo& condition) { this->m_condition = condition; }
+void DynamicValue::attachCondition (const ConditionInfo& condition) {
+    this->m_condition = condition;
+    this->applyCondition ();
+}
+
+void DynamicValue::applyCondition () {
+    if (!this->m_condition.has_value ()) {
+	return;
+    }
+
+    std::string text;
+
+    switch (this->m_type) {
+	case UnderlyingType::String:
+	    text = this->m_string;
+	    break;
+	case UnderlyingType::Int:
+	    text = std::to_string (this->m_int);
+	    break;
+	case UnderlyingType::Float: {
+	    // "1" and "1.0" are the same option
+	    const float value = this->m_float;
+	    if (value == std::floor (value) && std::abs (value) < 1.0e9f) {
+		text = std::to_string (static_cast<long long> (value));
+	    } else {
+		std::ostringstream stream;
+		stream << value;
+		text = stream.str ();
+	    }
+	    break;
+	}
+	case UnderlyingType::Boolean:
+	    // already the result of a condition, or a checkbox ("true"/"1")
+	    text = this->m_bool ? "true" : "false";
+	    if (this->m_condition->condition == "1" || this->m_condition->condition == "0") {
+		text = this->m_bool ? "1" : "0";
+	    }
+	    break;
+	default:
+	    return;
+    }
+
+    const bool matches = text == this->m_condition->condition;
+
+    this->m_ivec4 = glm::ivec4 (matches ? 1 : 0);
+    this->m_ivec3 = glm::ivec3 (matches ? 1 : 0);
+    this->m_ivec2 = glm::ivec2 (matches ? 1 : 0);
+    this->m_vec2 = glm::vec2 (matches ? 1.0f : 0.0f);
+    this->m_vec3 = glm::vec3 (matches ? 1.0f : 0.0f);
+    this->m_vec4 = glm::vec4 (matches ? 1.0f : 0.0f);
+    this->m_float = matches ? 1.0f : 0.0f;
+    this->m_int = matches ? 1 : 0;
+    this->m_bool = matches;
+    this->m_string = matches ? "1" : "0";
+    this->m_type = UnderlyingType::Boolean;
+}
 
 void DynamicValue::propagate () const {
     for (const auto& callback : this->m_listeners) {

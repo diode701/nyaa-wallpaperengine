@@ -110,6 +110,12 @@ private:
      * Notifies any listeners that the value has changed
      */
     void propagate () const;
+    /**
+     * A conditional setting ({"user": {"name": ..., "condition": "1"}}) is true
+     * when the property's value equals the condition. Combos carry numbers as
+     * often as strings, so compare the value's text whatever its type.
+     */
+    void applyCondition ();
 
     std::shared_ptr<bool> m_aliveFlag = std::make_shared<bool> (true);
     std::list<std::function<void (const DynamicValue&)>> m_listeners = {};
