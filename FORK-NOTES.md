@@ -92,7 +92,19 @@ Everything in here was verified by running wallpapers, not by reading the code.
     textures; user images are fitted to the layer. Overrides aimed at text
     label properties are ignored instead of aborting the wallpaper (this
     crashed the Yukinoshita preset, `3413953090`).
-16. **Web diagnostics.** Load errors and renderer crashes are logged;
+16. **User text reaches the scene.** Four bugs together kept text bound to a
+    user property (window headers, city names, countdown labels) at its
+    default or empty: textinput properties stored the JSON form ("\"TYO\"")
+    and never notified their listeners, so overrides never arrived; JS strings
+    were written back as `true` (`update(const char*)` picked the bool
+    overload); and conditional settings (`{"user": {"name", "condition"}}`)
+    were only evaluated for string values, so every alignment variant drew at
+    once. All fixed; conditions compare the value's text whatever its type.
+17. **Text at four scene pixels per point** (was five; upstream PR #716's
+    measurement), and no invented text: the name-based fallbacks that filled
+    any empty "Clock"/"Date" layer with the local time, and two hard-coded
+    position nudges for specific wallpapers, are gone.
+18. **Web diagnostics.** Load errors and renderer crashes are logged;
     `LWE_WEB_DEBUG` prints the page's console.
 
 ## Building

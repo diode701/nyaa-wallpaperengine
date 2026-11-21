@@ -45,7 +45,6 @@ private:
     bool updateTexture (const std::string& text, float pointSize, const std::string& alignment);
     std::vector<unsigned char> loadFontData ();
     [[nodiscard]] std::string resolveRenderText () const;
-    void adjustOriginForKnownLayout (glm::vec3& origin) const;
     void fitScaleToMaxWidth (glm::vec3& scale) const;
     void uploadTextQuad (const glm::vec3& origin, const glm::vec3& scale, float angle, const std::string& alignment);
     static std::vector<std::string> splitLines (const std::string& text);

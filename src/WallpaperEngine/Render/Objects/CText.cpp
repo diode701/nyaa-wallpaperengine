@@ -533,7 +533,11 @@ bool CText::updateTexture (const std::string& text, float pointSize, const std::
 	return false;
     }
 
-    const int pixelSize = static_cast<int> (glm::clamp (std::round (pointSize * 5.0f), 6.0f, 512.0f));
+    // Wallpaper Engine sizes text at about four scene pixels per point
+    // (measured against the editor's stored text bounds, upstream PR #716:
+    // 12 of 18 objects at 3.9-4.3, median 4.07); 5 made columns collide
+    constexpr float scenePixelsPerPoint = 4.0f;
+    const int pixelSize = static_cast<int> (glm::clamp (std::round (pointSize * scenePixelsPerPoint), 6.0f, 512.0f));
     FT_Set_Pixel_Sizes (face, 0, static_cast<FT_UInt> (pixelSize));
 
     const auto lines = splitLines (text);
@@ -578,38 +582,9 @@ bool CText::updateTexture (const std::string& text, float pointSize, const std::
 }
 
 std::string CText::resolveRenderText () const {
-    std::string renderText = this->m_text.text->value->getString ();
-    if (!renderText.empty ()) {
-	return renderText;
-    }
-
-    const std::time_t now = std::time (nullptr);
-    std::tm localTime {};
-    localtime_r (&now, &localTime);
-    std::ostringstream stream;
-
-    if (this->m_text.name.find ("Clock") != std::string::npos) {
-	stream << std::put_time (&localTime, "%H:%M:%S");
-	return stream.str ();
-    }
-    if (this->m_text.name.find ("Date") != std::string::npos) {
-	stream << std::put_time (&localTime, "%A, %B ") << localTime.tm_mday;
-	return stream.str ();
-    }
-    if (this->m_text.name.find ("DAY DATE TIME") != std::string::npos) {
-	stream << std::put_time (&localTime, "%a");
-	renderText = stream.str ();
-	std::ranges::transform (renderText, renderText.begin (), [] (unsigned char c) { return static_cast<char> (std::toupper (c)); });
-    }
-    return renderText;
-}
-
-void CText::adjustOriginForKnownLayout (glm::vec3& origin) const {
-    if (this->m_text.name.find ("Canzone") != std::string::npos) {
-	origin.y += 85.0f;
-    } else if (this->m_text.name.find ("Artista") != std::string::npos) {
-	origin.y += 75.0f;
-    }
+    // the text comes from the scene: a fixed value, a user property or a
+    // script. Nothing is invented here (an empty layer stays empty)
+    return this->m_text.text->value->getString ();
 }
 
 void CText::fitScaleToMaxWidth (glm::vec3& scale) const {
@@ -688,7 +663,6 @@ void CText::updateBuffer () {
     const glm::vec3 angles = { 0.0f, 0.0f, -transform.angle };
     const std::string alignment = this->m_text.alignment.empty () ? "center center" : this->m_text.alignment;
 
-    this->adjustOriginForKnownLayout (origin);
 
     const bool textureDirty = !this->m_textureReady || renderText != this->m_lastText
 	|| pointSize != this->m_lastPointSize || alignment != this->m_lastAlignment || this->m_text.font != this->m_lastFont;
